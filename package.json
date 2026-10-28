@@ -12,7 +12,9 @@
     "cloud": "node scripts/cloud-server.mjs",
     "cloud:setup": "node scripts/cloud-setup.mjs",
     "companion": "node scripts/companion.mjs",
-    "companion:pair": "node scripts/companion.mjs --pair"
+    "companion:pair": "node scripts/companion.mjs --pair",
+    "test:chat-ui": "node scripts/chat-e2e.mjs",
+    "test:capture-ui": "node scripts/capture-e2e.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "5.4.624"

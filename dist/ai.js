@@ -1,5 +1,5 @@
 import {deviceHeaders} from './cloud-storage.js';
-export async function askAI(messages, config = {}, signal) {
+export async function askAI(messages, config = {}, signal, {literature}={}) {
   const endpoint = config.endpoint || "/api/chat";
   const url = new URL(endpoint, location.href);
   if (
@@ -21,6 +21,7 @@ export async function askAI(messages, config = {}, signal) {
         messages,
         model: config.model || undefined,
         stream: false,
+        ...(literature&&url.origin===location.origin?{literature:{pages:literature.pages}}:{}),
       }),
       signal: own.signal,
     });
@@ -94,11 +95,11 @@ export async function translateBlocks(blocks, config, signal) {
   return result;
 }
 
-export async function askCodex(messages, config, signal, {literature, onEvent=()=>{}}={}) {
+export async function askCodex(messages, config, signal, {literature, conversation, onEvent=()=>{}}={}) {
   const own=new AbortController(), timeout=setTimeout(()=>own.abort(),330000);
   const abort=()=>own.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)own.abort();
   try {
-    const response=await fetch('/api/codex/chat',{method:'POST',headers:{'Content-Type':'application/json',...deviceHeaders()},body:JSON.stringify({messages,model:config.codexModel||undefined,literature:{pages:literature?.pages||[]}}),signal:own.signal});
+    const response=await fetch('/api/codex/chat',{method:'POST',headers:{'Content-Type':'application/json',...deviceHeaders()},body:JSON.stringify({messages,conversation,model:config.codexModel||undefined,literature:{pages:literature?.pages||[]}}),signal:own.signal});
     if(!response.ok){const data=await response.json();throw new Error(data.error||'Codex 连接失败');}
     const reader=response.body.getReader(), decoder=new TextDecoder();let buffer='',result;
     const consume=line=>{if(!line.trim())return;const event=JSON.parse(line);if(event.type==='error')throw new Error(event.message);if(event.type==='done')result=event.result;else onEvent(event);};

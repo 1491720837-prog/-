@@ -34,7 +34,7 @@
             data-icon="download"
           >
             导出</button
-          ><button id="import-button" class="button primary" data-icon="plus">
+          ><button id="capture-button" class="button subtle">采集箱</button><button id="podcast-button" class="button subtle">导入播客</button><button id="import-button" class="button primary" data-icon="plus">
             导入文献
           </button>
         </div>
@@ -80,6 +80,7 @@
           <div class="avatar">我</div>
         </nav>
         <main class="panels" id="panels">
+          <section class="content-workspace" aria-label="内容工作台"><div class="content-header"><strong>01 内容工作台</strong><span>文献 · 播客 · 文章</span></div><div class="content-panes">
           <section class="reader-panel english-panel">
             <div class="panel-header">
               <span class="panel-title"
@@ -223,17 +224,18 @@
               ></button>
             </div>
           </section>
+          </div></section>
           <div
             class="splitter"
-            data-split="zh"
+            data-split="content"
             role="separator"
-            aria-label="调整译文宽度"
+            aria-label="调整内容区宽度"
             tabindex="0"
           ></div>
           <section class="canvas-panel">
             <div class="panel-header">
               <span class="panel-title"
-                ><span class="panel-number">03</span> 思考画布
+                ><span class="panel-number">02</span> 思考画布
                 <span class="count-pill" id="node-count">5</span></span
               >
               <div class="header-actions">
@@ -258,7 +260,7 @@
                   data-icon="spark"
                 >
                   作为 AI 上下文
-                </button>
+                </button><button class="button subtle" id="chat-toggle" aria-pressed="true">AI 对话</button>
               </div>
             </div>
             <div
@@ -371,11 +373,12 @@
               <div id="drag-box" class="drag-box hidden"></div>
             </div>
           </section>
+          <aside class="board-chat" id="board-chat" aria-label="画布 AI 对话"></aside>
         </main>
       </div>
     </div>
     <div id="selection-popup" class="selection-popup hidden">
-      <div class="popup-top">
+      <div class="popup-top"><button id="drag-excerpt" class="small-button" draggable="true" title="拖到画布指定位置">拖入画布</button>
         <span data-icon="check"></span><span>已保留摘录</span
         ><button
           id="dismiss-popup"

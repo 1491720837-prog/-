@@ -6,6 +6,7 @@ import {demoSections} from '../dist/demo.js';
 import {commentSystem} from '../dist/comment-prompt.js';
 import {parseJSON} from '../dist/ai.js';
 import {validateCorpus,searchPages,readPage,manifest,literatureTools} from './literature-context.mjs';
+import {textCorpus} from '../dist/content-source.js';
 
 export class CloudAI {
   constructor({devices,env=process.env,request=fetch}){this.devices=devices;this.env=env;this.request=request;this.cache=new Map();}
@@ -44,7 +45,7 @@ export class CloudAI {
     const pages=[];
     for(const doc of project.docs.filter(d=>ids.has(d.id))){
       if(doc.type==='demo'){for(const side of ['en','zh'])pages.push({docId:doc.id,name:doc.name,page:1,side,text:demoSections.map(s=>s[side]||'').join('\n')});continue;}
-      if(doc.type==='text'){pages.push({docId:doc.id,name:doc.name,page:1,side:'en',text:doc.text||''});continue;}
+      if(doc.type==='text'){pages.push(...textCorpus(doc));continue;}
       for(const [side,file] of [['en',doc],['zh',doc.translationPDF]]){
         if(!file?.data)continue;const key=digest(file.data);let texts=this.cache.get(key);
         if(!texts){

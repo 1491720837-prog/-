@@ -10,10 +10,11 @@ export function validateCorpus(input = []) {
     const key = `${p.docId}:${p.side}:${p.page}`;
     if (seen.has(key)) throw new Error('文献页码重复');
     seen.add(key);
-    return { docId:p.docId, name:p.name, page:p.page, side:p.side, text:p.text };
+    if(p.kind!==undefined&&!['podcast','article','text'].includes(p.kind))throw Error('资料类型无效');
+    return { docId:p.docId, name:p.name, page:p.page, side:p.side, text:p.text,...(p.kind?{kind:p.kind}:{}) };
   });
 }
-export function pageLabel(p) { return `${p.name} · ${p.side === 'zh' ? '中文' : '原文'} · 第 ${p.page} 页`; }
+export function pageLabel(p) { return p.kind?`${p.name} · 文本分块 ${p.page}（非页码；按正文原有时间戳或段落引用）`:`${p.name} · ${p.side === 'zh' ? '中文' : '原文'} · 第 ${p.page} 页`; }
 export function searchPages(pages, { query, docId, side, limit = 6 } = {}) {
   if (typeof query !== 'string' || !query.trim() || query.length > 500) throw new Error('请输入有效的文献检索词');
   const q = query.toLowerCase().trim();
@@ -36,7 +37,7 @@ export function readPage(pages, {docId,side,page,offset=0}={}) {
 export function manifest(pages) {
   const docs=new Map();
   for(const p of pages) {const key=p.docId+':'+p.side;if(!docs.has(key))docs.set(key,{docId:p.docId,name:p.name,side:p.side,pages:[]});docs.get(key).pages.push(p.page);}
-  return [...docs.values()].map(d=>({...d,emptyPages:d.pages.filter(page=>!pages.find(p=>p.docId===d.docId&&p.side===d.side&&p.page===page).text.trim())}));
+  return [...docs.values()].map(d=>({...d,...(pages.find(p=>p.docId===d.docId)?.kind?{kind:pages.find(p=>p.docId===d.docId).kind}:{}),emptyPages:d.pages.filter(page=>!pages.find(p=>p.docId===d.docId&&p.side===d.side&&p.page===page).text.trim())}));
 }
 export const literatureTools = [
   {type:'function',name:'search_document',description:'检索本次提供的文献全文。可用中英文关键词；返回匹配片段和真实 PDF 页码。需要完整上下文时继续读取该页。',inputSchema:{type:'object',properties:{query:{type:'string'},docId:{type:'string'},side:{type:'string',enum:['en','zh']},limit:{type:'integer'}},required:['query'],additionalProperties:false}},

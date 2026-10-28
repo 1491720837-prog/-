@@ -1,3 +1,4 @@
+import {mountBoardChat} from './board-chat.js';
 import {deviceHeaders} from './cloud-storage.js';
 import {isCloud,cloudRefresh,preserveCloudDraft} from './cloud-storage.js';
 import {
@@ -44,6 +45,9 @@ import { createFeishuSync } from "./feishu-sync.js";
 import { mergeFeishuChanges } from "./feishu-merge.js";
 import { createDemo, demoSections } from "./demo.js";
 import { download, zip, canvasImage } from "./export.js";
+import {openPodcastImport} from './podcast-import.js';
+import {safeWebURL,textParts} from './content-source.js';
+import {installBrowserCapture} from './browser-capture.js';
 const $ = (q, r = document) => r.querySelector(q),
   $$ = (q, r = document) => [...r.querySelectorAll(q)];
 const icons = {
@@ -97,6 +101,7 @@ function esc(s) {
   );
 }
 let state;
+let translationVisible=true;
 try {
   const saved = await readSaved();
   state = saved ? validateDetails(validateProject(saved)) : createDemo();
@@ -141,6 +146,7 @@ let selected = new Set(),
   nodeWasDragged = false,
   editorId = null,
   searchIndex = 0;
+let boardChat;
 const busy = new Map();
 const aiProgress = new Map();
 function toast(text) {
@@ -325,12 +331,20 @@ async function renderReader() {
   readerDocId = d.id;
   stopCrop();
   $("#document-name").textContent = d.name;
+  const heading=$('.english-panel .panel-title');heading.innerHTML='<span class="panel-number">01</span> '+(d.contentKind==='podcast'?'播客逐字稿':d.contentKind==='article'?'文章阅读':'原文阅读')+' <span class="language-badge">'+(d.contentKind==='podcast'?'音频':d.contentKind==='article'?'网页':'EN')+'</span>';
+  $('#english-scroll').setAttribute('aria-label',d.contentKind==='podcast'?'播客逐字稿连续阅读区':d.contentKind==='article'?'文章连续阅读区':'英文文献连续阅读区');
+  const pairedView=!d.contentKind&&translationVisible;
+  $(".content-workspace").classList.toggle('single-source',!pairedView);
+  $(".translation-panel").classList.toggle('hidden',!pairedView);
+  $(".splitter[data-split=en]").classList.toggle('hidden',!pairedView);
+  $("#show-translation").classList.toggle('hidden',pairedView||!!d.contentKind);
+  boardChat?.render();
   updateReaderPosition();
   updateZoomControls();
   for (const el of $$(".reader-scroll")) el.classList.toggle("fit-content", d.type === "pdf" && readerFitContent);
   $("#english-paper").style.width = readerZoom * 100 + "%";
   $("#chinese-paper").style.width = readerZoom * 100 + "%";
-  $("#translate-button").disabled = d.type === "demo" || !!d.translationPDF;
+  $("#translate-button").disabled = d.type === "demo" || !!d.translationPDF || d.contentKind==='podcast';
   $("#import-translation").innerHTML = icon("file") + (d.translationPDF ? "管理中文译本" : "导入中文译本");
   $("#translation-status").textContent =
     d.type === "demo" ? "示例译文 · 与原文对照" : "同版式译文 · 待翻译";
@@ -343,15 +357,28 @@ async function renderReader() {
     const h = document.createElement("h1");
     h.textContent = d.name;
     en.append(h);
-    for (const [i, p] of d.text.split(/\n\s*\n/).entries()) {
+    if(d.contentKind){
+      const info=document.createElement('p');info.className='content-provenance';info.textContent=d.contentKind==='podcast'?'飞书妙记逐字稿 · 保留转写原文和时间标记':'浏览器采集 · 正文快照';
+      for(const [label,url] of [['原始链接',d.provenance?.sourceUrl],['飞书妙记',d.provenance?.minuteUrl]])if(safeWebURL(url)){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.textContent=' · '+label;info.append(a);}en.append(info);
+    }
+    const readingParts=d.contentKind==='article'&&d.contentBlocks?.length?d.contentBlocks:textParts(d).map(text=>({type:'text',text}));
+    for (const [i, part] of readingParts.entries()) {
+      if(part.type==='image'){
+        const figure=document.createElement('figure');figure.dataset.section='t'+i;
+        if(/^data:image\/(png|jpeg|webp);base64,/.test(part.data||'')){const img=document.createElement('img');img.src=part.data;img.alt=part.alt||'文章图片';img.style.maxWidth='100%';img.draggable=true;img.ondragstart=e=>{e.dataTransfer.setData('application/x-folio-article-image',JSON.stringify({projectId:state.projectId,docId:d.id,index:i}));e.dataTransfer.effectAllowed='copy';};figure.append(img);}
+        else{const a=document.createElement('a');a.textContent='图片未保存 · 打开原图';a.href=safeWebURL(part.url);a.target='_blank';a.rel='noopener';figure.append(a);}en.append(figure);continue;
+      }
       const el = document.createElement("p");
-      el.textContent = p;
+      el.textContent = part.text;
+      el.style.whiteSpace = 'pre-wrap';
       el.dataset.section = "t" + i;
       en.append(el);
     }
     en.append(Object.assign(document.createElement("div"), { className: "highlight-layer" }));
     $("#english-paper").replaceChildren(en);
-    renderTextTranslation(d);
+    if(d.contentKind==='podcast'){
+      const panel=document.createElement('article');panel.className='demo-paper';const heading=document.createElement('h2');heading.textContent='播客逐字稿';const p=document.createElement('p');p.textContent='左侧可连续阅读、高亮并生成摘录节点。转写为飞书自动识别结果，专有名词和说话人请结合音频核对。';panel.append(heading,p);const b=document.createElement('button');b.className='button';b.textContent='下载完整文字稿';b.onclick=()=>download(d.name+'.txt',d.text,'text/plain;charset=utf-8');panel.append(b);$('#chinese-paper').replaceChildren(panel);$('#translation-status').textContent='播客逐字稿 · 非译文';
+    }else renderTextTranslation(d);
   } else {
     $("#english-paper").textContent = "正在准备连续阅读…";
     $("#chinese-paper").textContent = "正在准备中文对照…";
@@ -767,6 +794,7 @@ function captureSelection(e, side) {
     selected.size === 1 ? [...selected][0] : null,
   );
   activeExcerpt = n.id;
+  const transfer=$('#drag-excerpt');if(transfer){transfer.ondragstart=e=>{e.dataTransfer.setData('application/x-folio-excerpt',JSON.stringify({projectId:state.projectId,nodeId:n.id}));e.dataTransfer.effectAllowed='copy';};}
   selected = new Set([n.id]);
   changed();
   centerNode(n.id);
@@ -984,7 +1012,7 @@ function renderCanvas() {
     .map((n) => {
       const a = appearance(state.nodes, state.edges, n),
         count = descendants(state.nodes, n.id).length;
-      return `<article class="node${n.height ? " fixed-height" : ""}${n.fitContent ? " fit-content" : ""}${selected.has(n.id) ? " selected" : ""}${busy.has(n.id) ? " busy" : ""}" data-node-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${n.width || 262}px;${n.height ? `--node-height:${n.height}px;` : ""}--node-color:${a.color}" tabindex="0" aria-label="${esc(n.title)}"><div class="node-header"><span class="node-level">${a.label}</span><span class="node-title">${esc(n.title)}</span><span class="node-kind">${n.kind === "ai" ? "AI" : n.kind === "quote" ? "摘录" : n.kind === "image" ? "图片" : "笔记"}</span></div>${n.prompt ? `<div class="node-question">问：${esc(n.prompt)}</div>` : ""}<div class="node-body">${imagePreview(n)}<div class="node-text${n.text ? "" : " empty"}">${esc(n.text)}</div></div>${busy.has(n.id) ? `<div class="node-ai-progress"><span>${esc(aiProgress.get(n.id) || "正在准备回答…")}</span><button data-cancel-ai="${esc(n.id)}" class="small-button">取消</button></div>` : ""}${n.aiEvidence ? `<div class="node-model" title="本次回答生成时的模型与推理强度">${esc(aiModelLabel(n.aiEvidence))}</div>` : ""}${n.error ? `<div class="node-error">${esc(n.error)} · 打开节点可重试</div>` : ""}<div class="node-footer">${n.source ? `<button class="source-link" data-source="${esc(n.id)}">${icon("file")} p.${n.source.page} · ${esc(n.source.translationPDFName || state.docs.find((d) => d.id === n.source.docId)?.name || "原文")}</button>` : "<span>个人笔记</span>"}<button class="node-followup" data-followup="${esc(n.id)}">${icon("spark")} 追问</button></div>${[["top", "上方", "拖动建立关联"], ["right", "右侧", "拖向子节点"], ["bottom", "下方", "拖动建立关联"], ["left", "左侧", "拖向父节点"]].map(([side, name, hint]) => `<button class="port port-${side}" data-port="${side}" title="${hint}" aria-label="${name}连接点：${esc(n.title)} · ${hint}"></button>`).join("")}${nodeResizeHandles(n)}${count ? `<button class="node-collapse" data-collapse="${esc(n.id)}" title="${n.collapsed ? "展开" : "折叠"}后续节点">${n.collapsed ? "+" : "−"} ${count}</button>` : ""}</article>`;
+      return `<article class="node${n.height ? " fixed-height" : ""}${n.fitContent ? " fit-content" : ""}${selected.has(n.id) ? " selected" : ""}${busy.has(n.id) ? " busy" : ""}" data-node-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${n.width || 262}px;${n.height ? `--node-height:${n.height}px;` : ""}--node-color:${a.color}" tabindex="0" aria-label="${esc(n.title)}"><div class="node-header"><span class="node-level">${a.label}</span><span class="node-title">${esc(n.title)}</span><span class="node-kind">${n.kind === "ai" ? "AI" : n.kind === "quote" ? "摘录" : n.kind === "image" ? "图片" : "笔记"}</span></div>${n.prompt ? `<div class="node-question">问：${esc(n.prompt)}</div>` : ""}<div class="node-body">${imagePreview(n)}<div class="node-text${n.text ? "" : " empty"}">${esc(n.text)}</div></div>${busy.has(n.id) ? `<div class="node-ai-progress"><span>${esc(aiProgress.get(n.id) || "正在准备回答…")}</span><button data-cancel-ai="${esc(n.id)}" class="small-button">取消</button></div>` : ""}${n.aiEvidence ? `<div class="node-model" title="本次回答生成时的模型与推理强度">${esc(aiModelLabel(n.aiEvidence))}</div>` : ""}${n.error ? `<div class="node-error">${esc(n.error)} · 打开节点可重试</div>` : ""}<div class="node-footer">${n.source ? `<button class="source-link" data-source="${esc(n.id)}">${icon("file")} ${esc(sourceCitation(state,n.source))}</button>` : "<span>个人笔记</span>"}<button class="node-followup" data-followup="${esc(n.id)}">${icon("spark")} 追问</button></div>${[["top", "上方", "拖动建立关联"], ["right", "右侧", "拖向子节点"], ["bottom", "下方", "拖动建立关联"], ["left", "左侧", "拖向父节点"]].map(([side, name, hint]) => `<button class="port port-${side}" data-port="${side}" title="${hint}" aria-label="${name}连接点：${esc(n.title)} · ${hint}"></button>`).join("")}${nodeResizeHandles(n)}${count ? `<button class="node-collapse" data-collapse="${esc(n.id)}" title="${n.collapsed ? "展开" : "折叠"}后续节点">${n.collapsed ? "+" : "−"} ${count}</button>` : ""}</article>`;
     })
     .join("");
   $("#node-count").textContent = state.nodes.length;
@@ -1229,7 +1257,7 @@ function editNode(id, focusQuestion = false, focusField = null) {
   );
   openDrawer(
     "节点笔记",
-    `${imagePreview(n)}<label class="field-label" for="node-width">节点宽度 <span id="node-width-value">${n.width || 262}</span> px</label><input id="node-width" type="range" min="180" max="800" value="${n.width || 262}" style="width:100%"><label class="field-label" for="node-height">节点高度 <span id="node-height-value">${n.height ? nodeHeight(id) + " px" : "自动"}</span></label><input id="node-height" type="range" min="118" max="2000" value="${Math.min(2000, nodeHeight(id))}" style="width:100%"><button id="fit-node-content" class="small-button">适应内容</button><label class="field-label" for="edit-title">标题</label><input class="text-field" id="edit-title" value="${esc(n.title)}"><label class="field-label" for="edit-text">${n.kind === "ai" ? "AI 回答 · 可编辑" : "笔记内容"}</label><textarea class="text-area" id="edit-text">${esc(n.text)}</textarea><label class="field-label" for="edit-parent">归属节点 · 调整后自动更新层级</label><select class="select-field" id="edit-parent"><option value="">独立 / 顶层节点</option>${parentOptions.map((p) => `<option value="${esc(p.id)}" ${p.id === n.parentId ? "selected" : ""}>${esc(p.title)}</option>`).join("")}</select>${n.prompt ? `<details open><summary>原始问题</summary><div class="source-box">${esc(n.prompt)}</div></details>` : ""}${n.source ? `<details><summary>引用内容 · 第 ${n.source.page} 页</summary><p>${esc(sourceCitation(state, n.source))}</p><div class="source-box">${esc(n.source.text || "图片摘录")}${n.source.translation ? "\n\n中文：" + esc(n.source.translation) : ""}</div><button class="small-button" id="editor-source">定位原文与译文</button></details>` : ""}${n.research?.length ? `<details><summary>学术检索来源 · Crossref 元数据</summary><div class="source-box">${n.research.map((r) => `<p><a target="_blank" rel="noopener noreferrer" href="https://doi.org/${encodeURIComponent(r.doi || "")}">${esc(r.title || r.doi)}</a><br>${esc(r.authors || "")} · ${esc(r.year || "")}</p>`).join("")}</div></details>` : ""}${renderAIEvidence(n)}${n.context ? `<details><summary>当时发送给 AI 的上下文</summary><div class="source-box">${esc(n.context)}</div></details>` : ""}${n.history?.length ? `<details><summary>历史回答 · ${n.history.length} 条</summary><div class="source-box">${esc(n.history.map((h) => "问：" + h.prompt + "\n答：" + h.text).join("\n\n"))}</div></details>` : ""}${n.error ? `<p class="node-error">${esc(n.error)}</p><button id="retry-ai" class="button">重试这个问题</button>` : ""}<div style="display:flex;gap:8px;margin-top:20px"><button class="button" id="new-child">＋ 子笔记</button><button class="button" id="detach-node">转为独立节点</button></div>`,
+    `${imagePreview(n)}<label class="field-label" for="node-width">节点宽度 <span id="node-width-value">${n.width || 262}</span> px</label><input id="node-width" type="range" min="180" max="800" value="${n.width || 262}" style="width:100%"><label class="field-label" for="node-height">节点高度 <span id="node-height-value">${n.height ? nodeHeight(id) + " px" : "自动"}</span></label><input id="node-height" type="range" min="118" max="2000" value="${Math.min(2000, nodeHeight(id))}" style="width:100%"><button id="fit-node-content" class="small-button">适应内容</button><label class="field-label" for="edit-title">标题</label><input class="text-field" id="edit-title" value="${esc(n.title)}"><label class="field-label" for="edit-text">${n.kind === "ai" ? "AI 回答 · 可编辑" : "笔记内容"}</label><textarea class="text-area" id="edit-text">${esc(n.text)}</textarea><label class="field-label" for="edit-parent">归属节点 · 调整后自动更新层级</label><select class="select-field" id="edit-parent"><option value="">独立 / 顶层节点</option>${parentOptions.map((p) => `<option value="${esc(p.id)}" ${p.id === n.parentId ? "selected" : ""}>${esc(p.title)}</option>`).join("")}</select>${n.prompt ? `<details open><summary>原始问题</summary><div class="source-box">${esc(n.prompt)}</div></details>` : ""}${n.source ? `<details><summary>引用内容</summary><p>${esc(sourceCitation(state, n.source))}</p><div class="source-box">${esc(n.source.text || "图片摘录")}${n.source.translation ? "\n\n中文：" + esc(n.source.translation) : ""}</div><button class="small-button" id="editor-source">定位原文与译文</button></details>` : ""}${n.research?.length ? `<details><summary>学术检索来源 · Crossref 元数据</summary><div class="source-box">${n.research.map((r) => `<p><a target="_blank" rel="noopener noreferrer" href="https://doi.org/${encodeURIComponent(r.doi || "")}">${esc(r.title || r.doi)}</a><br>${esc(r.authors || "")} · ${esc(r.year || "")}</p>`).join("")}</div></details>` : ""}${renderAIEvidence(n)}${n.context ? `<details><summary>当时发送给 AI 的上下文</summary><div class="source-box">${esc(n.context)}</div></details>` : ""}${n.history?.length ? `<details><summary>历史回答 · ${n.history.length} 条</summary><div class="source-box">${esc(n.history.map((h) => "问：" + h.prompt + "\n答：" + h.text).join("\n\n"))}</div></details>` : ""}${n.error ? `<p class="node-error">${esc(n.error)}</p><button id="retry-ai" class="button">重试这个问题</button>` : ""}<div style="display:flex;gap:8px;margin-top:20px"><button class="button" id="new-child">＋ 子笔记</button><button class="button" id="detach-node">转为独立节点</button></div>`,
     `<p>继续追问，回答会保存在此节点右侧</p><form id="followup-form" class="ask-input"><input id="followup-question" placeholder="沿着这个想法，继续问…" aria-label="节点追问"><div class="model-picker"><button type="button" class="model-picker-trigger" aria-label="选择追问模型" aria-haspopup="menu" aria-expanded="false" aria-controls="followup-model-menu"><span>默认模型</span>${icon("chevronDown")}</button><div id="followup-model-menu" class="model-picker-menu" role="menu" aria-label="选择模型" hidden></div></div><button class="send-button" type="submit" aria-label="发送追问">${icon("arrowUp")}</button></form>${busy.has(id) ? '<button id="cancel-ai" class="small-button">取消生成</button>' : ""}`,
   );
   for (const key of ["width", "height"]) {
@@ -1692,7 +1720,7 @@ function openOutline() {
   );
 }
 async function switchProject(next) {
-  if(busy.size || translationAbort)throw new Error("请先等待生成或翻译完成，或取消后再切换项目");
+  if(busy.size || translationAbort || boardChat?.busy)throw new Error("请先等待生成或翻译完成，或取消后再切换项目");
   inlineEditor.finish();clearTimeout(saveTimer);
   validateDetails(validateProject(next));
   next.config={...state.config};next.shortcuts ||= [];next.questionGroups ||= [];
@@ -1701,7 +1729,7 @@ async function switchProject(next) {
   $("#modal").close();closeDrawer();$("#selection-popup").classList.add("hidden");
   $("#project-name").textContent=state.title;
   changed();if(state.canvasLayout!=="mindmap-lr-v1")arrangeMindmap();
-  await renderReader();checkStatus();
+  await renderReader();checkStatus();boardChat?.render();
   toast("已打开项目，其他项目完整保留，可从「项目」切换");
 }
 async function openProjects() {
@@ -2344,6 +2372,20 @@ bind("#translation-settings", settings);
 bind("#help-button", help);
 bind("#export-button", openExport);
 bind("#import-button", () => $("#file-input").click());
+async function importContentResult(result){
+  if(!result.document||!result.projectId)throw Error('资料结果不完整');
+  if(result.projectId!==state.projectId){let target=await readSavedProject(result.projectId);if(!target){target=createDemo();target.projectId=result.projectId;target.title=result.document.name;target.docs=[result.document];target.activeDoc=result.document.id;target.nodes=[];target.edges=[];target.page=1;target.canvasLayout='mindmap-lr-v1';}else if(!target.docs.some(d=>d.id===result.document.id)){target.docs.push(result.document);target.activeDoc=result.document.id;target.page=1;}target.activeDoc=result.document.id;target.page=1;await switchProject(target);}
+  else{if(!state.docs.some(d=>d.id===result.document.id))state.docs.push(result.document);state.activeDoc=result.document.id;state.page=1;clearTimeout(saveTimer);await writeSaved(state);$('#modal').close();await renderReader();}
+  save();toast('资料已导入，原项目与导图完整保留');
+}
+bind('#podcast-button',()=>openPodcastImport({modal,esc,projectId:()=>state.projectId,uid,download,toast,onImport:importContentResult}));
+installBrowserCapture({button:$('#capture-button'),modal,esc,uid,projectId:()=>state.projectId,onImport:importContentResult,toast});
+boardChat=mountBoardChat({root:$('#board-chat'),getState:()=>state,getSelected:()=>selected,persist:async workspace=>{clearTimeout(saveTimer);await writeSaved(workspace);if(state===workspace)$("#save-status").innerHTML=isCloud?"<i></i> 已保存到云端":"<i></i> 已保存到本机";},toast,onSettings:settings,onResize:refreshWorkspaceSize,preferences:readingPreferences,
+  onNode(message,text,position){checkpoint();const n=makeNode({kind:message.role==='assistant'?'ai':'note',title:text.split('\n')[0].slice(0,100)||'聊天摘录',text,prompt:message.prompt||'',source:message.source?structuredClone(message.source):undefined,chatSource:{chatId:state.chat.id,messageId:message.id,role:message.role,model:message.model,at:message.at},aiEvidence:message.evidence?{...message.evidence,provider:message.evidence.provider||(message.threadId?'codex':'api'),model:message.model||'API 服务默认',trace:message.evidence.trace||[]}:undefined});if(position)Object.assign(n,position);selected=new Set([n.id]);changed();centerNode(n.id);},
+  onOutline(plan,doc,messageId){checkpoint();const ids=new Map();for(const item of plan){const n=makeNode({kind:'ai',title:item.title,text:item.text+(item.timestamp?'\n\n时间：'+item.timestamp:''),prompt:'整理播客内容',source:{docId:doc.id,page:1,side:'en',text:item.quote,selectedText:item.quote},chatSource:{chatId:state.chat.id,messageId,role:'assistant'}},ids.get(item.parentId)||null);ids.set(item.id,n.id);}changed();boardChat?.render();toast('已生成 '+plan.length+' 个节点；开启飞书同步后会自动更新文档');}
+});
+bind('#chat-toggle',()=>boardChat.toggle());
+
 bind("#import-translation", openTranslationImport);
 $("#translation-file-input").onchange = (e) => attachTranslation(translationTarget, e.target.files[0]);
 $("#file-input").onchange = (e) => importFiles([...e.target.files]);
@@ -2604,17 +2646,7 @@ for (const [a, b] of [
     }
     requestAnimationFrame(() => (scrolling = false));
   };
-function setTranslation(show) {
-  $(".translation-panel").classList.toggle("hidden", !show);
-  $(".splitter[data-split=zh]").classList.toggle("hidden", !show);
-  $("#show-translation").classList.toggle("hidden", show);
-  if (show) {
-    $(".translation-panel").style.display = "flex";
-    $(".splitter[data-split=zh]").style.display = "block";
-  }
-  fitPanelWidths();
-  renderReader();
-}
+function setTranslation(show) { translationVisible=show;renderReader(); }
 bind("#hide-translation", () => setTranslation(false));
 bind("#show-translation", () => setTranslation(true));
 bind("#search-button", () => {
@@ -2666,33 +2698,12 @@ $("#search-input").onkeydown = (e) => {
 };
 bind("#search-next", search);
 function panelWidthLimits(target) {
-  const panels = $("#panels"),
-    canvasMin = parseFloat(getComputedStyle($(".canvas-panel")).minWidth),
-    otherWidth = [...panels.children]
-      .filter((panel) => panel !== target && !panel.matches(".canvas-panel"))
-      .reduce((sum, panel) => sum + panel.getBoundingClientRect().width, 0),
-    min = parseFloat(getComputedStyle(target).minWidth);
-  return { min, max: Math.max(min, panels.clientWidth - otherWidth - canvasMin) };
+  const isInner=target.matches('.english-panel');
+  const available=isInner?$('.content-panes').clientWidth:$('#panels').clientWidth-($('#board-chat').classList.contains('hidden')?0:$('#board-chat').offsetWidth)-126;
+  const min=isInner?120:260;return {min,max:Math.max(min,available-(isInner?126:0))};
 }
-function resizePanel(target, width) {
-  const { min, max } = panelWidthLimits(target);
-  target.style.width = Math.max(min, Math.min(max, width)) + "px";
-}
-function fitPanelWidths() {
-  // A narrower window or reopening the translation must not push the canvas
-  // and its divider outside the workspace.
-  const readers = $$(".reader-panel").filter((panel) => !panel.classList.contains("hidden")),
-    widths = readers.map((panel) => panel.getBoundingClientRect().width),
-    minima = readers.map((panel) => parseFloat(getComputedStyle(panel).minWidth)),
-    dividerWidth = $$(".splitter").reduce((sum, panel) => sum + panel.getBoundingClientRect().width, 0),
-    excess = widths.reduce((sum, width) => sum + width, 0) + dividerWidth
-      + parseFloat(getComputedStyle($(".canvas-panel")).minWidth) - $("#panels").clientWidth,
-    room = widths.reduce((sum, width, i) => sum + Math.max(0, width - minima[i]), 0);
-  if (excess <= 0 || !room) return;
-  readers.forEach((panel, i) => {
-    panel.style.width = Math.max(minima[i], widths[i] - excess * (widths[i] - minima[i]) / room) + "px";
-  });
-}
+function resizePanel(target,width){const {min,max}=panelWidthLimits(target);target.style.width=Math.max(min,Math.min(max,width))+'px';}
+function fitPanelWidths(){resizePanel($('.content-workspace'),$('.content-workspace').offsetWidth);}
 for (const splitter of $$(".splitter")) {
   splitter.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
@@ -2700,7 +2711,7 @@ for (const splitter of $$(".splitter")) {
     const target =
         splitter.dataset.split === "en"
           ? $(".english-panel")
-          : $(".translation-panel"),
+          : $(".content-workspace"),
       width = target.offsetWidth,
       start = e.clientX;
     splitter.setPointerCapture(e.pointerId);
@@ -2723,7 +2734,7 @@ for (const splitter of $$(".splitter")) {
     const target =
       splitter.dataset.split === "en"
         ? $(".english-panel")
-        : $(".translation-panel");
+        : $(".content-workspace");
     resizePanel(target, target.offsetWidth + (e.key === "ArrowRight" ? 15 : -15));
     renderReader();
   };
@@ -3152,6 +3163,13 @@ $("#canvas").addEventListener("paste", (e) => {
 });
 $("#canvas").ondrop = (e) => {
   e.preventDefault();
+  const chatData=e.dataTransfer.getData('application/x-folio-chat');
+  const r=$('#canvas').getBoundingClientRect(),position={x:(e.clientX-r.left-state.view.x)/state.view.scale,y:(e.clientY-r.top-state.view.y)/state.view.scale};
+  if(chatData){try{boardChat.drop(JSON.parse(chatData),position);}catch(error){toast(error.message);}return;}
+  const excerpt=e.dataTransfer.getData('application/x-folio-excerpt');
+  if(excerpt){try{const data=JSON.parse(excerpt);if(data.projectId!==state.projectId)return;const node=getNode(data.nodeId);if(node){checkpoint();Object.assign(node,position);changed();centerNode(node.id);}}catch{}return;}
+  const articleImage=e.dataTransfer.getData('application/x-folio-article-image');
+  if(articleImage){try{const data=JSON.parse(articleImage);if(data.projectId!==state.projectId)return;const doc=state.docs.find(d=>d.id===data.docId),part=doc?.contentBlocks?.[data.index];if(!part?.data)return;checkpoint();const node=makeNode({kind:'image',title:part.alt||'文章图片',text:'',image:part.data,source:{docId:doc.id,page:1,side:'en',section:'t'+data.index,text:part.alt||'图片'}});Object.assign(node,position);changed();centerNode(node.id);}catch{}return;}
   const figure = e.dataTransfer.getData("application/x-folio-figure");
   if (figure) addFigure(figure);
   else importImages([...e.dataTransfer.files]);
@@ -3218,7 +3236,7 @@ if (!(await readSaved().catch(() => null))) setTimeout(fitCanvas, 150);
 
 async function receiveFeishu(incoming,choice){
  const active=state.projectId===incoming.projectId;
- if(active&&(inlineEditor.active||editorId||busy.size||drag||document.activeElement?.matches('input,textarea,[contenteditable="true"]')))return {deferred:true};
+ if(active&&(inlineEditor.active||editorId||busy.size||boardChat?.busy||drag||document.activeElement?.matches('input,textarea,[contenteditable="true"]')))return {deferred:true};
  const previous=active?structuredClone(state):await readSavedProject(incoming.projectId);
  if(!previous)return {deferred:true};
  if(previous.feishuReceipt===incoming.token)return {count:0};
@@ -3252,9 +3270,9 @@ if(isCloud){
   document.querySelector('#save-status').textContent='在线版 · 云端保存';
   let refreshing=false;
   setInterval(async()=>{
-    if(refreshing||inlineEditor.active||editorId||busy.size||drag||translationAbort||document.activeElement?.matches('input,textarea,[contenteditable="true"]'))return;
+    if(refreshing||inlineEditor.active||editorId||busy.size||boardChat?.busy||drag||translationAbort||document.activeElement?.matches('input,textarea,[contenteditable="true"]'))return;
     refreshing=true;const previous=state;
-    try{const next=await cloudRefresh(previous);if(next&&state===previous&&!inlineEditor.active&&!editorId&&!busy.size&&!drag){
+    try{const next=await cloudRefresh(previous);if(next&&state===previous&&!inlineEditor.active&&!editorId&&!busy.size&&!boardChat?.busy&&!drag){
       clearTimeout(saveTimer);state=next;selected.clear();undoStack=[];redoStack=[];
       document.querySelector('#project-name').textContent=state.title;renderCanvas();await renderReader();toast('已接收云端更新（其他设备或飞书）');
     }}catch(e){document.querySelector('#save-status').textContent=e.status===401?'登录已过期':'云端暂不可达，草稿保留在此浏览器';}finally{refreshing=false;}

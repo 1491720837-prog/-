@@ -1,5 +1,7 @@
+import {validateChat} from './board-chat-model.js';
 import {isCloud,cloudCurrent,cloudWrite,cloudList,cloudRead,cloudActivate} from './cloud-storage.js';
 import { putProject } from "./projects.js";
+import {contentSourceLabel,safeWebURL} from './content-source.js';
 export const palette = [
   "#6c8fa8",
   "#699e8e",
@@ -25,6 +27,7 @@ export function pairedTranslation(original, translated, id = uid()) {
   return { id, name: translated.name, type: "pdf", data: translated.data, pages: translated.pages };
 }
 export function sourceCitation(state, source) {
+  const contentLabel=contentSourceLabel(state.docs.find(d=>d.id===source.docId),source);if(contentLabel)return contentLabel;
   const original = state.docs.find((d) => d.id === source.docId)?.name || source.docId;
   const pages = source.segments?.map((part) => part.page) || [source.page];
   const pageLabel = pages.length > 1 ? `${Math.min(...pages)}–${Math.max(...pages)}` : source.page;
@@ -276,6 +279,7 @@ export async function activateSavedProject(previous,next) {
   });
 }
 export function validateDetails(s) {
+  validateChat(s.chat);
   const safeId = (v) =>
     typeof v === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(v);
   if (typeof s.title !== "string" || s.title.length > 1000)
@@ -298,6 +302,11 @@ export function validateDetails(s) {
       throw new Error("PDF 数据无效");
     if (d.type === "text" && typeof d.text !== "string")
       throw new Error("文本数据无效");
+    if(d.contentKind!==undefined){
+      if(d.type!=='text'||!['podcast','article'].includes(d.contentKind)||!d.provenance||!safeWebURL(d.provenance.sourceUrl)||d.provenance.minuteUrl&&!safeWebURL(d.provenance.minuteUrl))throw Error('内容来源信息无效');
+      if(d.text.length>4_000_000)throw Error('内容过长');
+    }
+    if(d.contentBlocks!==undefined){if(!Array.isArray(d.contentBlocks)||d.contentBlocks.length>2000||d.contentBlocks.some(b=>!b||!['text','image'].includes(b.type)||b.type==='text'&&typeof b.text!=='string'||b.type==='image'&&(!safeWebURL(b.url)||b.data&&(!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]*={0,2}$/.test(b.data)||b.data.length>3_000_000))))throw Error('文章段落或图片无效');}
     if (d.translationPDF) {
       if (!safeId(d.translationPDF.id)) throw new Error("中文译本 ID 无效");
       pairedTranslation(d, d.translationPDF, d.translationPDF.id);

@@ -1,0 +1,1 @@
+body{width:320px;padding:16px;font:14px/1.6 system-ui;color:#30473b;background:#f7f8f4}h1{font-size:20px}input,button{box-sizing:border-box;width:100%;padding:10px;border:1px solid #d0d8cb;border-radius:8px;margin:8px 0}button{background:#53745a;color:#fff;cursor:pointer}small{color:#667266}#status{white-space:pre-wrap}button:disabled{opacity:.5}

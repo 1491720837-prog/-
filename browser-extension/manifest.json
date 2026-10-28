@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "保存到 Folio",
+  "version": "0.1.0",
+  "description": "将当前可阅读的文章正文、图片与来源采集到自己的 Folio 工作台。",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {"default_popup": "popup.html", "default_title": "保存到 Folio"}
+}

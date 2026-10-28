@@ -1,7 +1,11 @@
+import {CloudAI} from './cloud-ai.mjs';
 import {exportSyncBundle} from './migration.mjs';
 import http from "node:http";
 import { CodexBridge } from "./codex-bridge.mjs";
 import { TranslationJobs } from "./translation-jobs.mjs";
+import {PodcastJobs,podcastRoute} from './podcast-jobs.mjs';
+import {captureImages} from './capture-images.mjs';
+const podcasts=new PodcastJobs();
 const codex = new CodexBridge();
 const translations = new TranslationJobs({codex});
 import { FeishuSync } from "./feishu-sync.mjs";
@@ -42,6 +46,15 @@ const server = http.createServer(async (req, res) => {
       req.headers.host !== `localhost:${port}`
     )
       return json(403, { error: "Host not allowed" });
+    if(url.pathname==='/api/capture/images'){
+      if(req.headers.origin&&![`http://localhost:${port}`,`http://127.0.0.1:${port}`].includes(req.headers.origin))return json(403,{error:'Origin not allowed'});
+      if(req.method!=='POST'||!req.headers['content-type']?.startsWith('application/json'))return json(415,{error:'JSON POST required'});let input='';for await(const chunk of req){input+=chunk;if(input.length>100000)return json(413,{error:'请求过大'});}return json(200,await captureImages(JSON.parse(input).urls));
+    }
+    if(url.pathname.startsWith('/api/podcasts/')){
+      if(req.headers.origin&&![`http://localhost:${port}`,`http://127.0.0.1:${port}`].includes(req.headers.origin))return json(403,{error:'Origin not allowed'});
+      let body={};if(req.method==='POST'){if(!req.headers['content-type']?.startsWith('application/json'))return json(415,{error:'JSON required'});let input='';for await(const chunk of req){input+=chunk;if(input.length>20000)return json(413,{error:'请求过大'});}body=JSON.parse(input||'{}');}
+      return json(200,await podcastRoute(podcasts,url.pathname,req.method,body,url.searchParams));
+    }
     if(url.pathname==='/api/migration/feishu'&&req.method==='GET'){
       if(req.headers.origin&&![`http://localhost:${port}`,`http://127.0.0.1:${port}`].includes(req.headers.origin))return json(403,{error:'Origin not allowed'});
       return json(200,await exportSyncBundle(feishu,feishuComments));
@@ -127,12 +140,13 @@ const server = http.createServer(async (req, res) => {
       let body = "";
       for await (const chunk of req) {
         body += chunk;
-        if (body.length > 12_000_000)
+        if (body.length > 45_000_000)
           return json(413, { error: "上下文过大，请缩小选择范围" });
       }
       const payload = JSON.parse(body);
       if (!Array.isArray(payload.messages))
         return json(400, { error: "messages required" });
+      if(payload.literature){const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});return json(200,await new CloudAI({}).apiAnswer(payload,controller.signal));}
       const base = process.env.FOLIO_AI_BASE_URL.replace(/\/$/, "");
       const upstream = await fetch(base + "/chat/completions", {
         method: "POST",
@@ -178,4 +192,4 @@ server.listen(port, "127.0.0.1", () => {
     execFile("open", [`http://127.0.0.1:${port}`]);
 });
 
-for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { codex.stop(); server.close(); process.exit(0); });
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { podcasts.stop();codex.stop(); server.close(); process.exit(0); });

@@ -20,7 +20,7 @@ if(process.argv.includes('--pair')){
   }finally{terminal.close();}
 }
 if(!connection)throw Error('请先运行 npm run companion:pair');
-const codex=new CodexBridge(),translations=new TranslationJobs({codex,root:join(root,'translations')}),active=new Map();
+const codex=new CodexBridge({conversationRoot:join(root,'codex-chats')}),translations=new TranslationJobs({codex,root:join(root,'translations')}),active=new Map();
 let stopping=false;
 function stop(){stopping=true;for(const c of active.values())c.abort();codex.stop();}
 process.on('SIGINT',stop);process.on('SIGTERM',stop);

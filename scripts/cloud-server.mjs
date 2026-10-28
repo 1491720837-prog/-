@@ -10,12 +10,15 @@ import {CloudWorker} from './cloud-worker.mjs';
 import {FeishuSync} from './feishu-sync.mjs';
 import {FeishuComments} from './feishu-comments.mjs';
 import {exportSyncBundle,importSyncBundle} from './migration.mjs';
+import {PodcastJobs,podcastRoute} from './podcast-jobs.mjs';
+import {captureImages} from './capture-images.mjs';
 
 export async function createCloudServer({env=process.env,feishu,comments:commentService,request=fetch}={}){
   const origin=env.FOLIO_PUBLIC_URL,auth=new CloudAuth({origin,secret:env.FOLIO_SESSION_SECRET,password:env.FOLIO_PASSWORD_HASH});
   if(!env.FOLIO_DATA_DIR)throw Error('必须指定持久化目录 FOLIO_DATA_DIR');
   const store=new CloudStore(resolve(env.FOLIO_DATA_DIR)),devices=new Devices(store),ai=new CloudAI({devices,env,request});
   const sync=feishu||new FeishuSync({root:join(store.root,'feishu-sync')}),comments=commentService||new FeishuComments(sync);
+  const podcasts=new PodcastJobs({root:join(store.root,'podcast-jobs')});
   const worker=new CloudWorker({store,devices,ai,sync,comments});await Promise.all([store.ready,devices.ready,worker.ready,sync.ready,comments.ready]);
   const root=fileURLToPath(new URL('../dist/',import.meta.url)).replace(/[\\/]$/,''),types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.wasm':'application/wasm','.json':'application/json','.png':'image/png','.pdf':'application/pdf'};
   const server=http.createServer(async(req,res)=>{
@@ -51,6 +54,8 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
         res.writeHead(303,{Location:'/login.html'});return res.end();
       }
       if(path==='/api/logout'&&req.method==='POST'){res.setHeader('Set-Cookie',auth.cookie('',0));return json(200,{ok:true});}
+      if(path.startsWith('/api/podcasts/'))return json(200,await podcastRoute(podcasts,path,req.method,req.method==='POST'?await body(20000):{},url.searchParams));
+      if(path==='/api/capture/images'&&req.method==='POST')return json(200,await captureImages((await body(100000)).urls));
       if(path==='/api/status')return json(200,{cloud:true,local:false,configured:ai.configured(),model:env.FOLIO_AI_MODEL||''});
       if(path==='/api/cloud/status')return json(200,{devices:await devices.list(),settings:worker.settings,worker:{running:worker.running,lastRun:worker.lastRun,errors:worker.errors},apiConfigured:ai.configured(),apiModels:(env.FOLIO_AI_MODELS||env.FOLIO_AI_MODEL||'').split(',').filter(Boolean)});
       if(path==='/api/cloud/pair'&&req.method==='POST')return json(200,await devices.pair());
@@ -89,7 +94,7 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
         const emit=e=>{if(!res.destroyed)res.write(JSON.stringify(e)+'\n');},timer=setInterval(()=>emit({type:'heartbeat'}),10000);
         try{emit({type:'status',message:'已发送到所选 Mac 的 Codex'});emit({type:'done',result:await devices.wait(j.id,controller.signal)});}catch(e){emit({type:'error',message:e.message});}finally{clearInterval(timer);res.end();}return;
       }
-      if(path==='/api/chat'&&req.method==='POST'){const b=await body(12_000_000);if(!Array.isArray(b.messages)||b.messages.length>100)return json(400,{error:'messages required'});return json(200,await ai.completion({messages:b.messages,model:b.model}));}
+      if(path==='/api/chat'&&req.method==='POST'){const b=await body(45_000_000);if(!Array.isArray(b.messages)||b.messages.length>100)return json(400,{error:'messages required'});const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});return json(200,b.literature?await ai.apiAnswer(b,controller.signal):await ai.completion({messages:b.messages,model:b.model},controller.signal));}
       if(path==='/api/translation/convert'&&req.method==='POST'){const j=await devices.create(deviceId,'convert',await body(85_000_000));return json(200,await devices.wait(j.id));}
       if(path==='/api/translation/jobs'&&req.method==='POST'){
         const b=await body(85_000_000),record=await store.get(b.projectId),d=record?.project.docs.find(d=>d.id===b.docId);
@@ -112,7 +117,7 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
     }catch(e){json(e.status||(e.code==='ENOENT'?404:500),{error:e.code==='ENOENT'?'Not found':e.message});}
   });
   server.requestTimeout=360000;server.headersTimeout=15000;
-  server.on('close',()=>worker.stop());
+  server.on('close',()=>{podcasts.stop();worker.stop();});
   return {server,store,devices,worker,sync,comments};
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){

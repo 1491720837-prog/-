@@ -1,3 +1,4 @@
+import {mkdtemp,rm,access} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import test from 'node:test';import assert from 'node:assert/strict';import {EventEmitter} from 'node:events';import {PassThrough,Writable} from 'node:stream';
 import {CodexBridge} from '../scripts/codex-bridge.mjs';
 function fakeCodex({stall=false}={}) {
@@ -8,6 +9,8 @@ function fakeCodex({stall=false}={}) {
   if(m.method==='initialize')send({id:m.id,result:{}});
   if(m.method==='account/read')send({id:m.id,result:{account:{type:'chatgpt'}}});
   if(m.method==='model/list')send({id:m.id,result:{data:[{model:'test-model',displayName:'Test',isDefault:true,hidden:false}]}});
+  if(m.method==='thread/resume')send({id:m.id,result:{thread:{id:m.params.threadId}}});
+  if(m.method==='thread/name/set')send({id:m.id,result:{}});
   if(m.method==='thread/start')send({id:m.id,result:{thread:{id:'t'+(++thread)}}});
   if(m.method==='turn/start') {const id=m.params.threadId;send({id:m.id,result:{turn:{id:'turn-'+id}}});send({method:'turn/started',params:{threadId:id,turn:{id:'turn-'+id}}});if(!stall)send({method:'item/tool/call',id:900,params:{threadId:id,turnId:'turn-'+id,tool:'read_document_page',arguments:{docId:'doc',side:'en',page:6}}});}
   if(m.id===900 && m.result){assert.match(m.result.contentItems[0].text,/ORCHID/);send({method:'item/completed',params:{threadId:'t1',item:{id:'final',type:'agentMessage',phase:'final_answer',text:'ORCHID，第 6 页。'}}});send({method:'turn/completed',params:{threadId:'t1',turn:{id:'turn-t1',status:'completed',items:[]}}});}
@@ -27,3 +30,8 @@ test('cancellation interrupts the turn, clears the job, and never returns a comp
  try{const pending=b.answer(payload,{signal:controller.signal});const rejected=assert.rejects(pending,/取消/);while(!fake.calls.some(m=>m.method==='turn/start'))await new Promise(r=>setImmediate(r));controller.abort();await rejected;await new Promise(r=>setImmediate(r));assert.ok(fake.calls.some(m=>m.method==='turn/interrupt'));assert.equal(b.jobs.size,0);assert.equal(b.inFlight,0);}finally{b.stop();}
 });
 test('invalid inputs fail before model execution',async()=>{const b=new CodexBridge({spawnProcess:()=>{throw Error('must not spawn');}});await assert.rejects(b.answer({messages:[{role:'user',content:[{type:'image_url',image_url:{url:'https://example.com/private'}}]}]}),/不支持/);});
+
+test('project conversations resume a durable Codex thread while one-shot node answers stay ephemeral',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'folio-chat-test-')),fake=fakeCodex(),b=new CodexBridge({executable:'fake',spawnProcess:()=>fake.child,conversationRoot:root});
+ try{const conversation={id:'chat-one',projectId:'project-one',title:'项目'};const first=await b.answer({...payload,conversation});const second=await b.answer({...payload,conversation});assert.equal(first.threadId,second.threadId);assert.equal(fake.calls.filter(m=>m.method==='thread/start').length,1);assert.equal(fake.calls.find(m=>m.method==='thread/start').params.ephemeral,false);assert.equal(fake.calls.filter(m=>m.method==='thread/resume').length,1);const cwd=fake.calls.find(m=>m.method==='thread/start').params.cwd;assert.ok(cwd.startsWith(root));assert.equal(fake.calls.find(m=>m.method==='thread/resume').params.cwd,cwd);b.stop();await access(cwd);await assert.rejects(b.answer({...payload,conversation:{...conversation,id:'../outside'}}),/标识/);}finally{b.stop();await rm(root,{recursive:true,force:true});}
+});
