@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#f7f8f6" />
+    <meta
+      name="description"
+      content="页间 Folio — 英文原文、中文译文和你的思考，在同一张桌面相遇。"
+    />
+    <title>页间 Folio · 阅读与思考</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%233b6a58'/%3E%3Cpath d='M17 16h15v32H17zM37 16h10v24H37z' fill='%23eff7eb'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./vendor/pdf_viewer.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="页间首页"
+          ><span class="brandmark">f</span><strong>页间</strong
+          ><span>FOLIO</span></a
+        ><span class="top-divider"></span
+        ><button id="project-name" class="project-name" title="重命名工作台">
+          主动阅读 · 从信息到理解</button
+        ><button id="projects-button" class="button subtle" title="保存与切换阅读项目">项目</button><span class="workspace-tag">个人工作台</span>
+        <div class="top-actions"><a class="button subtle" href="/online.html" target="_blank" rel="noopener">在线与本机</a><button id="feishu-sync-button" class="button subtle" title="同步节点、图片和原文件到飞书">飞书同步</button>
+          <span id="save-status" class="save-status"><i></i> 已保存到本机</span
+          ><button
+            id="export-button"
+            class="button subtle"
+            data-icon="download"
+          >
+            导出</button
+          ><button id="import-button" class="button primary" data-icon="plus">
+            导入文献
+          </button>
+        </div>
+      </header>
+      <div class="workspace">
+        <nav class="rail" aria-label="工作台工具">
+          <button
+            class="rail-button active"
+            id="library-button"
+            title="文献库"
+            aria-label="文献库"
+            data-icon="book"
+          ></button
+          ><button
+            class="rail-button"
+            id="outline-button"
+            title="节点大纲"
+            aria-label="节点大纲"
+            data-icon="layers"
+          ></button
+          ><button
+            class="rail-button"
+            id="context-rail"
+            title="AI 上下文"
+            aria-label="AI 上下文"
+            data-icon="spark"
+          ></button>
+          <div class="rail-spacer"></div>
+          <button
+            class="rail-button"
+            id="help-button"
+            title="使用指南"
+            aria-label="使用指南"
+            data-icon="help"
+          ></button
+          ><button
+            class="rail-button"
+            id="settings-button"
+            title="服务设置"
+            aria-label="服务设置"
+            data-icon="settings"
+          ></button>
+          <div class="avatar">我</div>
+        </nav>
+        <main class="panels" id="panels">
+          <section class="reader-panel english-panel">
+            <div class="panel-header">
+              <span class="panel-title"
+                ><span class="panel-number">01</span> 原文阅读
+                <span class="language-badge">EN</span></span
+              >
+              <div class="header-actions">
+                <button
+                  id="crop-button"
+                  class="icon-button"
+                  title="框选图片或表格"
+                  aria-label="框选图片或表格"
+                  aria-pressed="false"
+                  data-icon="crop"
+                ></button
+                ><button
+                  id="search-button"
+                  class="icon-button"
+                  title="查找当前页"
+                  aria-label="查找当前页"
+                  data-icon="search"
+                ></button>
+              </div>
+            </div>
+            <div class="document-bar">
+              <span data-icon="file"></span
+              ><span id="document-name">From reading to understanding</span
+              ><button
+                id="choose-doc"
+                class="icon-button"
+                title="切换文献"
+                aria-label="切换文献"
+                data-icon="chevronDown"
+              ></button>
+            </div>
+            <div class="search-strip hidden" id="search-strip">
+              <input id="search-input" placeholder="查找当前页内容" /><button
+                id="search-next"
+                class="icon-button"
+                data-icon="arrowRight"
+                aria-label="查找下一处"
+              ></button
+              ><button
+                id="search-close"
+                class="icon-button"
+                data-icon="close"
+                aria-label="关闭搜索"
+              ></button
+              ><span id="search-count"></span>
+            </div>
+            <div class="reader-scroll" id="english-scroll" tabindex="0" aria-label="英文文献连续阅读区">
+              <div class="paper-host" id="english-paper"></div>
+            </div>
+            <div class="reader-footer">
+              <div class="page-control">
+                <button
+                  id="prev-page"
+                  class="icon-button"
+                  data-icon="chevronLeft"
+                  aria-label="上一页"
+                ></button
+                ><input
+                  id="page-input"
+                  type="number"
+                  min="1"
+                  value="1"
+                  aria-label="页码"
+                /><span id="page-total">/ 1</span
+                ><button
+                  id="next-page"
+                  class="icon-button"
+                  data-icon="chevronRight"
+                  aria-label="下一页"
+                ></button>
+              </div>
+              <button id="fit-content" class="fit-content-button" title="裁去空白边缘，让正文适应栏宽" aria-label="适合正文">适合正文</button>
+              <div class="reader-zoom-controls" aria-label="中英文同步缩放">
+                <button class="icon-button" data-reader-zoom="out" data-icon="minus" aria-label="缩小文献"></button>
+                <button id="reader-zoom" class="small-button" data-reader-zoom="settings" title="中英文同步缩放">100%</button>
+                <button class="icon-button" data-reader-zoom="in" data-icon="plus" aria-label="放大文献"></button>
+              </div>
+            </div>
+          </section>
+          <div
+            class="splitter"
+            data-split="en"
+            role="separator"
+            aria-label="调整原文宽度"
+            tabindex="0"
+          ></div>
+          <section class="reader-panel translation-panel">
+            <div class="panel-header">
+              <span class="panel-title"
+                ><span class="panel-number">02</span> 中文对照
+                <span class="language-badge">中</span></span
+              ><div class="header-actions"><button id="crop-zh-button" class="icon-button" title="框选中文页面截图" aria-label="框选中文页面截图" aria-pressed="false" data-icon="crop"></button><button
+                id="hide-translation"
+                class="icon-button"
+                title="收起译文"
+                aria-label="收起译文"
+                data-icon="panel"
+              ></button></div>
+            </div>
+            <div class="document-bar translation-bar">
+              <button
+                id="sync-button"
+                class="sync-button active"
+                data-icon="link"
+              >
+                同步滚动</button
+              ><button id="import-translation" class="small-button" data-icon="file">
+                导入中文译本</button
+              ><button
+                id="translate-button"
+                class="small-button"
+                data-icon="spark"
+              >
+                翻译全文
+              </button>
+            </div>
+            <div
+              id="translation-progress"
+              class="translation-progress hidden"
+            ></div>
+            <div class="reader-scroll" id="chinese-scroll" tabindex="0" aria-label="中文文献连续阅读区">
+              <div class="paper-host" id="chinese-paper"></div>
+            </div>
+            <div class="reader-footer">
+              <span class="translation-status" id="translation-status"
+                ><i></i> 示例译文 · 与原文对照</span
+              ><div class="reader-zoom-controls" aria-label="中英文同步缩放">
+                <button class="icon-button" data-reader-zoom="out" data-icon="minus" aria-label="缩小文献"></button>
+                <button class="small-button" data-reader-zoom="settings" title="中英文同步缩放">100%</button>
+                <button class="icon-button" data-reader-zoom="in" data-icon="plus" aria-label="放大文献"></button>
+              </div><button
+                id="translation-settings"
+                class="icon-button"
+                data-icon="settings"
+                title="翻译服务设置"
+                aria-label="翻译服务设置"
+              ></button>
+            </div>
+          </section>
+          <div
+            class="splitter"
+            data-split="zh"
+            role="separator"
+            aria-label="调整译文宽度"
+            tabindex="0"
+          ></div>
+          <section class="canvas-panel">
+            <div class="panel-header">
+              <span class="panel-title"
+                ><span class="panel-number">03</span> 思考画布
+                <span class="count-pill" id="node-count">5</span></span
+              >
+              <div class="header-actions">
+                <button
+                  id="workspace-fullscreen"
+                  class="small-button workspace-fullscreen-button"
+                  title="全屏显示原文、中文对照和思考画布"
+                  aria-label="工作区全屏"
+                  aria-pressed="false"
+                  data-icon="maximize"
+                >全屏</button
+                ><button
+                  id="show-translation"
+                  class="icon-button hidden"
+                  title="显示译文"
+                  aria-label="显示译文"
+                  data-icon="panel"
+                ></button
+                ><button
+                  id="context-button"
+                  class="context-button"
+                  data-icon="spark"
+                >
+                  作为 AI 上下文
+                </button>
+              </div>
+            </div>
+            <div
+              id="canvas"
+              class="canvas"
+              tabindex="0"
+              aria-label="思考画布，可拖动背景平移，滚轮缩放，粘贴图片"
+            >
+              <div class="canvas-intro">
+                <span class="eyebrow">A SPACE FOR YOUR THOUGHTS</span
+                ><span>让想法在这里，慢慢发生连接。</span>
+              </div>
+              <div id="canvas-world" class="canvas-world">
+                <svg id="edges" class="edges">
+                  <defs>
+                    <marker
+                      id="arrow"
+                      viewBox="0 0 10 10"
+                      refX="8"
+                      refY="5"
+                      markerWidth="5"
+                      markerHeight="5"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M 0 0 L 10 5 L 0 10 z" fill="#a0aaa4" />
+                    </marker>
+                  </defs>
+                  <g id="edge-paths"></g>
+                </svg>
+                <div id="nodes"></div>
+              </div>
+              <div id="canvas-empty" class="canvas-empty hidden">
+                让第一个想法落在这里<span
+                  >划选原文、粘贴或拖入图片，或新建一条笔记。</span
+                >
+              </div>
+              <div id="selection-actions" class="selection-actions hidden">
+                <span id="selection-count"></span
+                ><button id="edit-selected" class="small-button">编辑</button
+                ><button id="collapse-selected" class="small-button">
+                  折叠 / 展开</button
+                ><button id="delete-selected" class="small-button danger">
+                  删除
+                </button>
+              </div>
+              <div class="canvas-tools">
+                <button
+                  id="new-note"
+                  class="tool-button"
+                  title="新建笔记 N"
+                  aria-label="新建笔记"
+                  data-icon="plus"
+                ></button
+                ><button
+                  id="add-image"
+                  class="tool-button"
+                  title="插入图片，也可点击画布后按 ⌘V / Ctrl+V 粘贴"
+                  aria-label="插入图片"
+                  data-icon="image"
+                ></button
+                ><span class="tool-divider"></span
+                ><button
+                  id="undo"
+                  class="tool-button"
+                  title="撤销 ⌘Z"
+                  aria-label="撤销"
+                  data-icon="undo"
+                ></button
+                ><button
+                  id="redo"
+                  class="tool-button"
+                  title="重做 ⌘⇧Z"
+                  aria-label="重做"
+                  data-icon="redo"
+                ></button
+                ><span class="tool-divider"></span
+                ><button
+                  id="zoom-out"
+                  class="tool-button"
+                  aria-label="缩小画布"
+                  data-icon="minus"
+                ></button
+                ><span id="canvas-zoom">76%</span
+                ><button
+                  id="zoom-in"
+                  class="tool-button"
+                  aria-label="放大画布"
+                  data-icon="plus"
+                ></button
+                ><button
+                  id="arrange-mindmap"
+                  class="tool-button"
+                  title="整理为思维导图：层级从左到右，独立分支从上到下"
+                  aria-label="整理为思维导图"
+                  data-icon="layers"
+                ></button
+                ><button
+                  id="fit-canvas"
+                  class="tool-button"
+                  title="适应全部节点"
+                  aria-label="适应全部节点"
+                  data-icon="maximize"
+                ></button>
+              </div>
+              <div class="canvas-legend">
+                <span><i style="background: #6c8fa8"></i> 层级配色</span
+                ><span><i style="background: #a294b4"></i> 独立想法</span
+                ><span id="ai-status">AI 待连接</span>
+              </div>
+              <div id="drag-box" class="drag-box hidden"></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <div id="selection-popup" class="selection-popup hidden">
+      <div class="popup-top">
+        <span data-icon="check"></span><span>已保留摘录</span
+        ><button
+          id="dismiss-popup"
+          class="icon-button"
+          aria-label="关闭摘录浮框"
+          data-icon="close"
+        ></button>
+      </div>
+      <div class="popup-actions" role="group" aria-label="摘录操作">
+        <button id="keep-excerpt" class="chip selected" data-excerpt-mode="quote" aria-pressed="true" aria-controls="excerpt-title-form" data-icon="quote">
+          直接摘录</button
+        ><button id="summarize" class="chip" data-excerpt-mode="summary" aria-pressed="false" data-icon="spark">总结概括</button>
+        <button id="ask-excerpt" class="chip" data-excerpt-mode="question" aria-pressed="false" aria-controls="selection-ai-panel" data-icon="message">问问 AI</button>
+      </div>
+      <form id="excerpt-title-form">
+        <label class="popup-field-label" for="excerpt-title">节点标题</label>
+        <div class="ask-input">
+          <input id="excerpt-title" placeholder="为这段摘录起个标题" aria-describedby="excerpt-footnote" />
+          <button type="submit" class="send-button" aria-label="完成标题编辑" title="完成编辑" data-icon="check"></button>
+        </div>
+      </form>
+      <div id="selection-ai-panel" class="hidden">
+      <form id="selection-question-form" class="ask-input">
+        <input
+          id="selection-question"
+          placeholder="对这段内容，有什么想问的？"
+          aria-label="向 AI 提问选中内容"
+        /><button
+          type="submit"
+          class="send-button"
+          aria-label="提交选区问题"
+          data-icon="arrowUp"
+        ></button>
+      </form>
+      <div id="learned-shortcuts"></div>
+      </div>
+      <div id="excerpt-footnote" class="popup-foot">只修改节点标题，原文与出处会一起保留</div>
+    </div>
+    <div id="drawer" class="drawer hidden"></div>
+    <dialog id="modal"></dialog>
+    <dialog id="image-viewer" aria-labelledby="image-viewer-title">
+      <div class="image-viewer-header">
+        <h2 id="image-viewer-title">查看大图</h2>
+        <div class="image-viewer-tools">
+          <button id="image-zoom-out" class="icon-button" aria-label="缩小图片" data-icon="minus"></button>
+          <span id="image-viewer-scale">100%</span>
+          <button id="image-zoom-in" class="icon-button" aria-label="放大图片" data-icon="plus"></button>
+          <button id="image-fit" class="small-button">适应窗口</button>
+          <button id="image-actual" class="small-button">原始大小</button>
+          <button id="image-viewer-close" class="icon-button" aria-label="关闭大图" data-icon="close" autofocus></button>
+        </div>
+      </div>
+      <div id="image-viewer-viewport" tabindex="0" aria-label="大图，可滚动查看"><img id="image-viewer-image" alt="" /></div>
+      <div id="image-viewer-caption"></div>
+    </dialog>
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    <input
+      type="file"
+      id="file-input"
+      accept=".pdf,.docx,.txt,.md,.folio.json,.json"
+      multiple
+      hidden
+    /><input type="file" id="translation-file-input" accept=".pdf,application/pdf" hidden
+    /><input
+      type="file"
+      id="image-input"
+      accept="image/png,image/jpeg,image/webp"
+      multiple
+      hidden
+    />
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

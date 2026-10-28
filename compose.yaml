@@ -1,0 +1,15 @@
+services:
+  folio:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4319:4319"
+    env_file: .env.cloud
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4319
+      FOLIO_DATA_DIR: /var/lib/folio/data
+    volumes:
+      - folio-data:/var/lib/folio
+volumes:
+  folio-data:

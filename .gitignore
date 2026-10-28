@@ -1,0 +1,10 @@
+node_modules/
+artifacts/
+.playwright/
+.DS_Store
+.env*
+!.env.example
+!.env.cloud.example
+data/
+.folio-companion/
+backups/
