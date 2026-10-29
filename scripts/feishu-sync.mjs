@@ -10,10 +10,11 @@ const exec=promisify(execFile),hash=v=>createHash('sha256').update(typeof v==='s
 export function contentSignature(xml){
  return hash(xml.replace(/\s+id="[^"]*"/g,'').replace(/<img\b[^>]*\/?>/g,tag=>'<img '+['src','token','caption'].map(a=>a+'='+JSON.stringify(tag.match(new RegExp('\\b'+a+'="([^"]*)"'))?.[1]||'')).join(' ')+'/>'));
 }
+const networkFailure=message=>/no such host|ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|operation timed out|i\/o timeout|network is unreachable|TLS handshake timeout/i.test(message||'');
 export const parentNode='HP8Wwh1rwiLzPYkVwSFco1Tinzf';
 export class FeishuSync {
  constructor({root=resolve('artifacts/feishu-sync'),run=exec}={}){this.root=root;this.run=run;this.pending=new Map();this.running=false;this.saving=Promise.resolve();this.ready=this.init();}
- async init(){await mkdir(this.root,{recursive:true});try{this.state=JSON.parse(await readFile(join(this.root,'state.json'),'utf8'));}catch{this.state={enabled:false,projects:{}};}for(const p of Object.values(this.state.projects))if(p.status==='syncing')p.status='interrupted';await this.save();}
+ async init(){await mkdir(this.root,{recursive:true});try{this.state=JSON.parse(await readFile(join(this.root,'state.json'),'utf8'));}catch{this.state={enabled:false,projects:{}};}for(const p of Object.values(this.state.projects)){if(p.status==='syncing')p.status='interrupted';if(p.status==='conflict'&&networkFailure(p.message))p.status='failed';}await this.save();}
  async save(){const text=JSON.stringify(this.state,null,2);const next=this.saving.catch(()=>{}).then(async()=>{await writeFile(join(this.root,'state.tmp'),text);await rename(join(this.root,'state.tmp'),join(this.root,'state.json'));});this.saving=next;return next;}
  async cli(args){try{const r=await this.run(process.env.FOLIO_LARK_BIN||'lark-cli',[...args,'--as','user','--format','json'],{timeout:240000,maxBuffer:25e6,env:{...process.env,LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'}});const j=JSON.parse(r.stdout);if(j.ok!==true||['failed','partial_success'].includes(j.data?.result))throw Error(j.error?.message||JSON.stringify(j.data));return j.data;}catch(e){let message=e.message;try{message=JSON.parse(e.stderr).error.message;}catch{}throw Error(message.slice(0,1200));}}
  async status(){await this.ready;return {enabled:this.state.enabled,parentUrl:'https://my.feishu.cn/wiki/'+parentNode,projects:Object.entries(this.state.projects).map(([id,p])=>({id,title:p.title,url:p.url,status:p.status,message:p.message,updatedAt:p.updatedAt,nodes:p.nodes,images:p.images}))};}
@@ -22,7 +23,7 @@ export class FeishuSync {
   if(s.nodes.length>5000)throw Error('项目节点超过同步上限 5000');
   const p=this.state.projects[s.projectId]||={title:s.title,status:'queued',assets:{}};
   if(p.incoming)throw Error('飞书有待合并的更新，请先接收飞书修改');
-  const digest=hash(s);if(p.digest===digest&&p.formatVersion===2&&!this.pending.has(s.projectId))return {unchanged:true};
+  const digest=hash(s);if(p.digest===digest&&p.formatVersion===3&&!this.pending.has(s.projectId))return {unchanged:true};
   // Remote edits require explicit resolution, never silently overwrite them.
   if(p.status==='conflict')throw Error('飞书文档有手动修改，已暂停此项目同步；请先处理冲突');
   this.pending.set(s.projectId,{s,digest});await writeFile(join(this.root,s.projectId+'.json'),JSON.stringify(s));
@@ -55,7 +56,7 @@ export class FeishuSync {
    await writeFile(join(this.root,id,'incoming.json'),JSON.stringify({items,changes,token,signature,revision:doc.revision_id}));
    p.incoming={token,changes};p.status='incoming';p.message='飞书修改待合并到工作台';await this.save();
    return {projectId:id,token,changes};
-  }catch(e){p.status='conflict';p.message=e.message;await this.save();throw e;}
+  }catch(e){p.status=networkFailure(e.message)?'failed':'conflict';p.message=e.message;await this.save();throw e;}
   finally{this.reading=false;this.drain();}
  }
  async acknowledge(id,token){
@@ -97,7 +98,7 @@ export class FeishuSync {
   }}
   if(p.title!==s.title){await this.cli(['drive','files','patch','--params',JSON.stringify({file_token:p.node,type:'wiki'}),'--data',JSON.stringify({new_title:s.title})]);p.title=s.title;before=await this.fetch(p.doc);}
   const old=topBlocks(before.content);await writeFile(join(dir,'previous.xml'),before.content);
-  const xml=renderProject(s,links),file=join(dir,'content.xml');await writeFile(file,xml);
+  const xml=renderProject(s,links,{nodeMarkers:true}),file=join(dir,'content.xml');await writeFile(file,xml);
   p.staging=true;p.message='写入节点层级与正文';await this.save();
   try{
    // Stage a complete replacement before removing old blocks. A failed image never erases the last good document.
@@ -121,7 +122,7 @@ export class FeishuSync {
    const headings=blocks.filter(b=>/^h[1-9]$/.test(b.tag));if(headings.length<s.nodes.length)throw Error('节点层级核验失败');
    if(blocks.some(b=>b.xml.includes('FOLIO_IMAGE_')))throw Error('存在未插入的节点图片');
    p.message='生成原生编号与层级';await this.save();
-   const plan=nativeOutline(await this.nativeBlocks(p.doc),blocks.map(b=>b.id),s.nodes);
+   const plan=nativeOutline(await this.nativeBlocks(p.doc),blocks.map(b=>b.id),s.nodes,{marked:true});
    const payload=join(dir,'native-outline.json');await writeFile(payload,JSON.stringify({children_id:plan.children_id,descendants:plan.descendants}));
    const created=await this.cli(['api','POST',`/open-apis/docx/v1/documents/${p.doc}/blocks/${p.doc}/descendant`,'--data','@'+relative(process.cwd(),payload)]);
    const ids=Object.fromEntries(created.block_id_relations.map(r=>[r.temporary_block_id,r.block_id]));
@@ -142,7 +143,7 @@ export class FeishuSync {
    await this.protectComments(p.doc);
    const discard=[...old,...blocks];
    for(let i=0;i<discard.length;i+=40)await this.update(p.doc,'block_delete',['--block-id',discard.slice(i,i+40).map(b=>b.id).join(',')]);
-   const final=await this.fetch(p.doc);p.revision=final.revision_id;p.remoteHash=contentSignature(final.content);p.imageBlocks=nextImages;p.nodeBlocks=Object.fromEntries(Object.entries(plan.nodeTitles).map(([n,id])=>[n,ids[id]]));p.blockNodes=Object.fromEntries(Object.entries(plan.owners).map(([id,n])=>[ids[id],n]));p.formatVersion=2;p.digest=digest;p.staging=false;p.nodes=s.nodes.length;p.images=s.nodes.filter(n=>n.image).length;p.updatedAt=new Date().toISOString();p.status='synced';p.message='原生编号、正文、图片与原文件已同步';await writeFile(join(dir,'readback-base.json'),JSON.stringify({snapshot:s,items:await this.nativeBlocks(p.doc,final.revision_id)}));await this.save();
+   const final=await this.fetch(p.doc);p.revision=final.revision_id;p.remoteHash=contentSignature(final.content);p.imageBlocks=nextImages;p.nodeBlocks=Object.fromEntries(Object.entries(plan.nodeTitles).map(([n,id])=>[n,ids[id]]));p.blockNodes=Object.fromEntries(Object.entries(plan.owners).map(([id,n])=>[ids[id],n]));p.formatVersion=3;p.digest=digest;p.staging=false;p.nodes=s.nodes.length;p.images=s.nodes.filter(n=>n.image).length;p.updatedAt=new Date().toISOString();p.status='synced';p.message='原生编号、正文、图片与原文件已同步';await writeFile(join(dir,'readback-base.json'),JSON.stringify({snapshot:s,items:await this.nativeBlocks(p.doc,final.revision_id)}));await this.save();
   }catch(e){
    // Roll back only newly staged blocks; old published blocks remain unless final cleanup had begun.
    try{await this.protectComments(p.doc);const current=await this.fetch(p.doc),oldIds=new Set(old.map(b=>b.id)),currentBlocks=topBlocks(current.content);if(old.every(b=>currentBlocks.some(c=>c.id===b.id))){const added=currentBlocks.filter(b=>!oldIds.has(b.id));for(let i=0;i<added.length;i+=40)await this.update(p.doc,'block_delete',['--block-id',added.slice(i,i+40).map(b=>b.id).join(',')]);p.staging=false;const restored=await this.fetch(p.doc);p.revision=restored.revision_id;p.remoteHash=contentSignature(restored.content);}}catch{}

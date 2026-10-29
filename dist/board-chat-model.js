@@ -19,3 +19,11 @@ export function validateOutline(value,doc){
   });
 }
 export function selectedChatText(message,text){if(typeof text!=='string'||!text.trim()||!message.text.includes(text))return message.text;return text;}
+
+export const projectReadingSystem = '本项目的原始资料是每轮对话的必备上下文，与画布节点范围无关。回答涉及文献、播客或文章的事实时，优先依据原始 PDF 文字、完整逐字稿或文章正文；已附片段不足时必须用 search_document 和 read_document_page 查阅全文，不要只根据节点标题、摘要或历史回答推测。PDF 引用实际页码；逐字稿引用已有时间戳或说话人，文章引用段落，不把文本分块编号当页码。无法读取的页面和图片必须明确说明，不得声称看过；本轮资料目录为准，不要把其他项目或已移除的资料视为当前证据。';
+export function requireProjectSourceGateway(config, origin) {
+  if (config.readingProvider !== 'api') return;
+  const url = new URL(config.endpoint || '/api/chat', origin);
+  if (url.origin !== new URL(origin).origin || url.pathname !== '/api/chat')
+    throw Error('项目对话需要全文检索。请在服务设置中把接口设为 /api/chat，并在工作台服务端配置 API 服务商；直接连接外部接口无法提供完整资料阅读工具。');
+}

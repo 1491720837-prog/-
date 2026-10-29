@@ -1,5 +1,5 @@
 import {deviceHeaders} from './cloud-storage.js';
-export async function askAI(messages, config = {}, signal, {literature}={}) {
+export async function askAI(messages, config = {}, signal, {literature,returnEvidence=false}={}) {
   const endpoint = config.endpoint || "/api/chat";
   const url = new URL(endpoint, location.href);
   if (
@@ -40,7 +40,7 @@ export async function askAI(messages, config = {}, signal, {literature}={}) {
     const answer = data.choices?.[0]?.message?.content ?? data.content;
     if (typeof answer !== "string" || !answer.trim())
       throw new Error("模型没有返回有效内容");
-    return answer;
+    return returnEvidence ? {content:answer,model:data.model||config.model||"API 服务默认",provider:"api",reasoningEffort:data.reasoningEffort,sources:data.sources||[],trace:data.trace||[]} : answer;
   } catch (e) {
     if (e.name === "AbortError")
       throw new Error(signal?.aborted ? "已取消生成" : "模型响应超时，请重试");

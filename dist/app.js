@@ -1,3 +1,5 @@
+import {renderMarkdown} from './node-markdown.js';
+import {mountProjectSidebar} from './project-sidebar.js';
 import {mountBoardChat} from './board-chat.js';
 import {deviceHeaders} from './cloud-storage.js';
 import {isCloud,cloudRefresh,preserveCloudDraft} from './cloud-storage.js';
@@ -64,6 +66,7 @@ const icons = {
     "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3l1-1h4l1 3 3 1 3-1 2 4-2 2v3l2 2-2 4-3-1-3 1-1 3h-4l-1-3-3-1-3 1-2-4 2-2v-3L1 9l2-4 3 1 3-1z",
   download: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
   crop: "M6 2v16h16M2 6h16v16",
+  sync: "M20 7a8 8 0 0 0-14-2L3 8m0-5v5h5M4 17a8 8 0 0 0 14 2l3-3m0 5v-5h-5",
   search: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
   chevronDown: "m6 9 6 6 6-6",
   chevronLeft: "m15 5-7 7 7 7",
@@ -113,6 +116,7 @@ try {
     1000,
   );
 }
+state.projectId ||= uid();
 state.config ||= { endpoint: "/api/chat", model: "" };
 state.config.readingProvider ||= isCloud ? "api" : "codex";
 state.view ||= { x: 25, y: 25, scale: 0.76 };
@@ -146,7 +150,7 @@ let selected = new Set(),
   nodeWasDragged = false,
   editorId = null,
   searchIndex = 0;
-let boardChat;
+let boardChat, projectSidebar;
 const busy = new Map();
 const aiProgress = new Map();
 function toast(text) {
@@ -162,6 +166,7 @@ function save() {
   saveTimer = setTimeout(async () => {
     try {
       await writeSaved(workspace);
+      projectSidebar?.refresh();
       $("#save-status").innerHTML = isCloud ? "<i></i> 已保存到云端" : "<i></i> 已保存到本机";
     } catch (e) {
       $("#save-status").textContent = "保存失败";
@@ -992,7 +997,7 @@ function makeNode(fields = {}, parentId = null) {
 }
 let deferredCanvasRender = false;
 const inlineEditor = createInlineEditor({
-  getNode, checkpoint, save,
+  getNode, checkpoint, save, renderText:renderMarkdown,
   onResize: () => { syncNodeSizes(); renderEdges(); renderSelection(); },
   onEnd: () => {
     if (deferredCanvasRender) { deferredCanvasRender=false; requestAnimationFrame(() => renderCanvas()); }
@@ -1007,12 +1012,13 @@ function startInlineEdit(id, key) {
 }
 function renderCanvas() {
   if (inlineEditor.active) { deferredCanvasRender=true; return; }
+  const scrollPositions=new Map($$("#nodes .node").map(card=>[card.dataset.nodeId,card.querySelector('.node-body')?.scrollTop||0]));
   const nodes = visibleNodes(state.nodes);
   $("#nodes").innerHTML = nodes
     .map((n) => {
       const a = appearance(state.nodes, state.edges, n),
         count = descendants(state.nodes, n.id).length;
-      return `<article class="node${n.height ? " fixed-height" : ""}${n.fitContent ? " fit-content" : ""}${selected.has(n.id) ? " selected" : ""}${busy.has(n.id) ? " busy" : ""}" data-node-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${n.width || 262}px;${n.height ? `--node-height:${n.height}px;` : ""}--node-color:${a.color}" tabindex="0" aria-label="${esc(n.title)}"><div class="node-header"><span class="node-level">${a.label}</span><span class="node-title">${esc(n.title)}</span><span class="node-kind">${n.kind === "ai" ? "AI" : n.kind === "quote" ? "摘录" : n.kind === "image" ? "图片" : "笔记"}</span></div>${n.prompt ? `<div class="node-question">问：${esc(n.prompt)}</div>` : ""}<div class="node-body">${imagePreview(n)}<div class="node-text${n.text ? "" : " empty"}">${esc(n.text)}</div></div>${busy.has(n.id) ? `<div class="node-ai-progress"><span>${esc(aiProgress.get(n.id) || "正在准备回答…")}</span><button data-cancel-ai="${esc(n.id)}" class="small-button">取消</button></div>` : ""}${n.aiEvidence ? `<div class="node-model" title="本次回答生成时的模型与推理强度">${esc(aiModelLabel(n.aiEvidence))}</div>` : ""}${n.error ? `<div class="node-error">${esc(n.error)} · 打开节点可重试</div>` : ""}<div class="node-footer">${n.source ? `<button class="source-link" data-source="${esc(n.id)}">${icon("file")} ${esc(sourceCitation(state,n.source))}</button>` : "<span>个人笔记</span>"}<button class="node-followup" data-followup="${esc(n.id)}">${icon("spark")} 追问</button></div>${[["top", "上方", "拖动建立关联"], ["right", "右侧", "拖向子节点"], ["bottom", "下方", "拖动建立关联"], ["left", "左侧", "拖向父节点"]].map(([side, name, hint]) => `<button class="port port-${side}" data-port="${side}" title="${hint}" aria-label="${name}连接点：${esc(n.title)} · ${hint}"></button>`).join("")}${nodeResizeHandles(n)}${count ? `<button class="node-collapse" data-collapse="${esc(n.id)}" title="${n.collapsed ? "展开" : "折叠"}后续节点">${n.collapsed ? "+" : "−"} ${count}</button>` : ""}</article>`;
+      return `<article class="node${n.height ? " fixed-height" : ""}${n.fitContent ? " fit-content" : ""}${selected.has(n.id) ? " selected" : ""}${busy.has(n.id) ? " busy" : ""}" data-node-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${n.width || 262}px;${n.height ? `--node-height:${n.height}px;` : ""}--node-color:${a.color}" tabindex="0" aria-label="${esc(n.title)}"><div class="node-header"><span class="node-level">${a.label}</span><span class="node-title">${esc(n.title)}</span>${n.source?`<button class="node-origin small-button" data-source="${esc(n.id)}" title="定位到对应文献页或原始段落（Alt + Enter）">回到原文</button>`:''}<span class="node-kind">${n.kind === "ai" ? "AI" : n.kind === "quote" ? "摘录" : n.kind === "image" ? "图片" : "笔记"}</span></div>${n.prompt ? `<div class="node-question">问：${esc(n.prompt)}</div>` : ""}<div class="node-body">${imagePreview(n)}<div class="node-text${n.text ? "" : " empty"}">${renderMarkdown(n.text)}</div></div>${busy.has(n.id) ? `<div class="node-ai-progress"><span>${esc(aiProgress.get(n.id) || "正在准备回答…")}</span><button data-cancel-ai="${esc(n.id)}" class="small-button">取消</button></div>` : ""}${n.aiEvidence ? `<div class="node-model" title="本次回答生成时的模型与推理强度">${esc(aiModelLabel(n.aiEvidence))}</div>` : ""}${n.error ? `<div class="node-error">${esc(n.error)} · 打开节点可重试</div>` : ""}<div class="node-footer">${n.source ? `<button class="source-link" data-source="${esc(n.id)}">${icon("file")} ${esc(sourceCitation(state,n.source))}</button>` : "<span>个人笔记</span>"}<button class="node-followup" data-followup="${esc(n.id)}">${icon("spark")} 追问</button></div>${[["top", "上方", "拖动建立关联"], ["right", "右侧", "拖向子节点"], ["bottom", "下方", "拖动建立关联"], ["left", "左侧", "拖向父节点"]].map(([side, name, hint]) => `<button class="port port-${side}" data-port="${side}" title="${hint}" aria-label="${name}连接点：${esc(n.title)} · ${hint}"></button>`).join("")}${nodeResizeHandles(n)}${count ? `<button class="node-collapse" data-collapse="${esc(n.id)}" title="${n.collapsed ? "展开" : "折叠"}后续节点">${n.collapsed ? "+" : "−"} ${count}</button>` : ""}</article>`;
     })
     .join("");
   $("#node-count").textContent = state.nodes.length;
@@ -1020,6 +1026,7 @@ function renderCanvas() {
   renderSelection();
   applyView();
   syncNodeSizes();
+  for(const card of $$("#nodes .node"))card.querySelector('.node-body').scrollTop=scrollPositions.get(card.dataset.nodeId)||0;
   for (const image of $$("#nodes .node-image")) image.onload = () => renderEdges();
   requestAnimationFrame(renderEdges);
 }
@@ -1087,6 +1094,7 @@ function renderSelection() {
   $("#selection-count").textContent = `${selected.size} 个节点`;
   $("#undo").disabled = !undoStack.length;
   $("#redo").disabled = !redoStack.length;
+  renderOutline();
 }
 function nodeWidth(id) {
   return getNode(id)?.width || 262;
@@ -1154,11 +1162,14 @@ function selectNode(id, add = false) {
   renderSelection();
   renderHighlights();
 }
-function centerNode(id) {
+function centerNode(id, readable = false) {
   const n = getNode(id);
   if (!n) return;
   for (const a of ancestors(state.nodes, id)) a.collapsed = false;
+  // Render expanded ancestors first so the destination's actual height is measured.
+  renderCanvas();
   const b = $("#canvas").getBoundingClientRect();
+  if (readable) state.view.scale = Math.max(0.15, Math.min(1, (b.width - 48) / nodeWidth(id), (b.height - 140) / nodeHeight(id)));
   state.view.x = b.width / 2 - (n.x + nodeWidth(n.id) / 2) * state.view.scale;
   state.view.y = b.height / 2 - (n.y + nodeHeight(id) / 2) * state.view.scale;
   renderCanvas();
@@ -1203,11 +1214,15 @@ function zoom(delta, x, y) {
 async function revealSource(id) {
   const n = getNode(id);
   if (!n?.source) return;
+  inlineEditor.finish();
+  if(!state.docs.some(d=>d.id===n.source.docId))return toast("引用资料已不在当前项目，请重新导入原文");
+  const revealTranslation=n.source.side==="zh"&&!translationVisible;
+  if(revealTranslation)translationVisible=true;
   const sameDoc = state.activeDoc === n.source.docId;
   state.activeDoc = n.source.docId;
   state.page = n.source.page;
   selected = new Set([id]);
-  if (!sameDoc || !readerStacks.en) await renderReader();
+  if (!sameDoc || !readerStacks.en || revealTranslation) await renderReader();
   if (readerStacks.en) await turnPage(n.source.page);
   if (n.source.side === "zh" &&
       (n.source.translationPDFId || null) !== (currentDoc().translationPDF?.id || null)) {
@@ -1224,8 +1239,10 @@ async function revealSource(id) {
   let target = n.source.section
     ? sheet?.querySelector(`[data-section="${CSS.escape(n.source.section)}"]`)
     : null;
+  let locatedAnchor=false;
+  if(sheet&&n.source.anchor){const range=rangeFromOffsets(sheet,n.source.anchor.start,n.source.anchor.end);if(range){const rect=range.getBoundingClientRect(),scroll=$(`#${side}-scroll`);scroll.scrollTop+=rect.top-scroll.getBoundingClientRect().top-scroll.clientHeight/3;target=null;locatedAnchor=true;} }
   if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
-  else if (sheet && n.source.rects?.length)
+  else if (sheet && !locatedAnchor && n.source.rects?.length)
     $(`#${side}-scroll`).scrollTop +=
       sheet.getBoundingClientRect().top - $(`#${side}-scroll`).getBoundingClientRect().top +
       n.source.rects[0].y * sheet.offsetHeight - 150;
@@ -1686,38 +1703,53 @@ function openLibrary() {
   );
   $("#library-import").onclick = () => $("#file-input").click();
 }
+function closeOutline(restoreFocus = false) {
+  $("#canvas-outline").classList.add("hidden");
+  $("#outline-button").setAttribute("aria-expanded", "false");
+  if (restoreFocus) $("#outline-button").focus({ preventScroll: true });
+}
 function openOutline() {
-  editorId = null;
-  const ordered = [],
-    stack = state.nodes
-      .filter((n) => !n.parentId)
-      .reverse()
-      .map((n) => [n, 0]);
-  while (stack.length) {
-    const [n, d] = stack.pop();
-    ordered.push([n, d]);
-    for (const child of state.nodes
-      .filter((x) => x.parentId === n.id)
-      .reverse())
-      stack.push([child, d + 1]);
+  if (!$("#canvas-outline").classList.contains("hidden")) { closeOutline(); return; }
+  $("#canvas-outline").classList.remove("hidden");
+  $("#outline-button").setAttribute("aria-expanded", "true");
+  renderOutline();
+}
+function renderOutline() {
+  if ($("#canvas-outline").classList.contains("hidden")) return;
+  const list = $("#outline-list"), scrollTop = list.scrollTop;
+  const children = new Map(), ids = new Set(state.nodes.map(n => n.id));
+  for (const n of state.nodes) {
+    const parent = ids.has(n.parentId) ? n.parentId : null;
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(n);
   }
-  openDrawer(
-    "节点大纲",
-    `<p style="font-size:11px;color:#91a084">${state.nodes.length} 个节点 · 层级不设上限</p>${ordered
-      .map(([n, d]) => {
-        const a = appearance(state.nodes, state.edges, n);
-        return `<button class="outline-entry" data-outline="${n.id}" style="margin-left:${Math.min(120, d * 15)}px;width:calc(100% - ${Math.min(120, d * 15)}px);--node-color:${a.color}"><span class="outline-level">${a.label}</span>${esc(n.title)}</button>`;
-      })
-      .join("")}`,
-  );
-  $$("[data-outline]").forEach(
-    (el) =>
-      (el.onclick = () => {
-        selectNode(el.dataset.outline);
-        centerNode(el.dataset.outline);
-        closeDrawer();
-      }),
-  );
+  for (const branch of children.values()) branch.sort((a, b) => a.y - b.y || a.x - b.x);
+  const ordered = [], seen = new Set();
+  const visit = (roots) => {
+    const stack = roots.slice().reverse().map(n => [n, 0]);
+    while (stack.length) {
+      const [n, depth] = stack.pop();
+      if (seen.has(n.id)) continue;
+      seen.add(n.id); ordered.push([n, depth]);
+      for (const child of (children.get(n.id) || []).slice().reverse()) stack.push([child, depth + 1]);
+    }
+  };
+  visit(children.get(null) || []);
+  visit(state.nodes.filter(n => !seen.has(n.id)));
+  $("#outline-summary").textContent = `${state.nodes.length} 个节点 · 点击定位，自动展开所在分支`;
+  list.innerHTML = ordered.length ? ordered.map(([n, depth]) => {
+    const a = appearance(state.nodes, state.edges, n);
+    return `<button class="outline-entry${selected.has(n.id) ? " active" : ""}" data-outline="${esc(n.id)}" aria-current="${selected.has(n.id)}" style="--depth:${Math.min(6, depth)};--node-color:${a.color}"><span class="outline-level">${a.label}</span><span>${esc(n.title || "未命名节点")}</span></button>`;
+  }).join("") : '<p class="outline-empty">还没有节点。选取内容摘录，或新建一条笔记，都会出现在这里。</p>';
+  list.scrollTop = scrollTop;
+}
+function jumpFromOutline(id) {
+  if (!getNode(id)) return;
+  inlineEditor.finish();
+  closeOutline();
+  selectNode(id);
+  centerNode(id, true);
+  $(`[data-node-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
 }
 async function switchProject(next) {
   if(busy.size || translationAbort || boardChat?.busy)throw new Error("请先等待生成或翻译完成，或取消后再切换项目");
@@ -1726,35 +1758,21 @@ async function switchProject(next) {
   next.config={...state.config};next.shortcuts ||= [];next.questionGroups ||= [];
   await activateSavedProject(state,next);
   state=next;selected.clear();undoStack=[];redoStack=[];activeExcerpt=null;
-  $("#modal").close();closeDrawer();$("#selection-popup").classList.add("hidden");
+  $("#modal").close();closeDrawer();closeOutline();$("#selection-popup").classList.add("hidden");
   $("#project-name").textContent=state.title;
   changed();if(state.canvasLayout!=="mindmap-lr-v1")arrangeMindmap();
-  await renderReader();checkStatus();boardChat?.render();
+  await renderReader();checkStatus();boardChat?.render();projectSidebar?.refresh();
   toast("已打开项目，其他项目完整保留，可从「项目」切换");
 }
-async function openProjects() {
+function createProjectDialog() {
   inlineEditor.finish();
-  try {
-    clearTimeout(saveTimer);await writeSaved(state);
-    const projects=await listSavedProjects();
-    modal("我的阅读项目",`<p>每个项目分别保存文献、译本、导图、图片和对话。切换前自动保存当前内容。</p><div class="project-list">${projects.map(p=>`<div class="project-entry"><strong>${esc(p.title)}${p.id===state.projectId?' <small>当前</small>':''}</strong><p>${p.docs} 份文献 · ${p.nodes} 个节点</p><p>${esc(p.documentNames.join(' / '))}</p><div><button class="button" data-open-project="${esc(p.id)}" ${p.id===state.projectId?'disabled':''}>${p.id===state.projectId?'已打开':'打开项目'}</button><button class="small-button" data-backup-project="${esc(p.id)}">下载完整备份</button></div></div>`).join('')}</div>`, '<button class="button" id="import-project">导入项目备份</button><button class="button primary" id="new-project">新建阅读项目</button>');
-    for(const button of $$("[data-open-project]"))button.onclick=async()=>{
-      button.disabled=true;
-      try{const saved=await readSavedProject(button.dataset.openProject);if(!saved)throw new Error("未找到项目，请使用备份恢复");await switchProject(saved);}catch(e){button.disabled=false;toast(e.message);}
-    };
-    for(const button of $$("[data-backup-project]"))button.onclick=async()=>{
-      const saved=await readSavedProject(button.dataset.backupProject);if(saved){const copy=structuredClone(saved);delete copy.config;delete copy._cloudRevision;download(copy.title+".folio.json",JSON.stringify(copy,null,2));}
-    };
-    $("#import-project").onclick=()=>{$("#modal").close();$("#file-input").click();};
-    $("#new-project").onclick=()=>{
-      modal("新建阅读项目",'<label class="field-label" for="new-project-title">项目名称</label><input id="new-project-title" class="text-field" value="新的阅读项目">','<button class="button primary" id="create-project">保存当前并新建</button>');
-      $("#create-project").onclick=async()=>{
-        const title=$("#new-project-title").value.trim();if(!title)return;
-        const next=createDemo();next.title=title;next.nodes=[];next.edges=[];next.canvasLayout="mindmap-lr-v1";next.view={x:25,y:25,scale:.76};
-        try{await switchProject(next);}catch(e){toast(e.message);}
-      };
-    };
-  }catch(e){toast("项目保存失败："+e.message);}
+  modal("新建阅读项目",'<label class="field-label" for="new-project-title">项目名称</label><input id="new-project-title" class="text-field" value="新的阅读项目">','<button class="button primary" id="create-project">保存当前并新建</button>');
+  $("#create-project").onclick=async()=>{
+    const title=$("#new-project-title").value.trim();if(!title)return;
+    const button=$("#create-project");button.disabled=true;
+    const next=createDemo();next.title=title;next.nodes=[];next.edges=[];next.canvasLayout="mindmap-lr-v1";next.view={x:25,y:25,scale:.76};
+    try{await switchProject(next);}catch(e){toast(e.message);button.disabled=false;}
+  };
 }
 async function importFiles(files) {
   for (const file of files) {
@@ -2243,7 +2261,7 @@ async function checkStatus() {
 function help() {
   modal(
     "让阅读，慢慢成为思考",
-    `<ol class="help-list"><li>点击思考画布标题栏的「全屏」，三栏工作区一起铺满屏幕；点击「退出全屏」或按 Esc 返回。</li><li>在英文或中文中划选文字，摘录会立即出现在画布。浮框里可以直接保留、总结概括或自由提问。</li><li>双击节点标题或正文即可原位编辑，自动保存；Enter 换行，⌘ / Ctrl + Enter 或 Esc 结束编辑。点击「追问」继续对话。回答生成在下一级，点击节点右侧的数字展开或折叠。</li><li>拖动节点标题移动位置；拖动右边、底边或右下角调整节点宽高，双击右下角适应内容。拖动背景平移画布；滚轮缩放。按住 <span class="kbd">Shift</span> 框选多个节点。</li><li>从右侧圆点拖向子节点、从左侧拖向父节点，上下圆点用于关联。独立新节点按顺序放在画布下方。工具栏的「整理为思维导图」可重新排列全部节点。松手直接连线；已有连线的端点拖到空白处松手即可断开，多条线共享圆点时先点中具体连线。Esc 取消，⌘Z / Ctrl+Z 撤销。点击线上的文字可调整关系。</li><li>中英文阅读栏的框选工具都可截图，松手后进入画布。图片也可以拖入或按 ⌘V / Ctrl+V 粘贴；点击节点图片查看大图，可缩放或查看原始大小。</li><li>选中节点后点「作为 AI 上下文」，预览范围和来源，再复制、导出，或生成新的想法。</li><li>所有数据保存在当前浏览器。用「完整项目」备份，之后可通过「导入文献」恢复。</li></ol><p>快捷键：<span class="kbd">N</span> 新建笔记　<span class="kbd">⌘Z</span> 撤销　<span class="kbd">⌘⇧Z</span> 重做　<span class="kbd">Esc</span> 取消选择</p><p>扫描 PDF 需要先 OCR。复杂版式翻译采用文字块定位；标有虚线的段落可以滚动查看。问答默认使用本机已登录的 Codex，可在服务设置中切换为 API；全文翻译仍需要配置模型 API。</p>`,
+    `<ol class="help-list"><li>画布左上角「节点大纲」展开层级目录，点击条目定位并选中节点；所在分支会自动展开。</li><li>点击思考画布标题栏的「全屏」，三栏工作区一起铺满屏幕；点击「退出全屏」或按 Esc 返回。</li><li>在英文或中文中划选文字，摘录会立即出现在画布。浮框里可以直接保留、总结概括或自由提问。</li><li>双击节点标题或正文即可原位编辑，自动保存；Enter 换行，⌘ / Ctrl + Enter 或 Esc 结束编辑。点击「追问」继续对话。回答生成在下一级，点击节点右侧的数字展开或折叠。</li><li>拖动节点标题移动位置；拖动右边、底边或右下角调整节点宽高，双击右下角适应内容。拖动背景平移画布；滚轮缩放。按住 <span class="kbd">Shift</span> 框选多个节点。</li><li>从右侧圆点拖向子节点、从左侧拖向父节点，上下圆点用于关联。独立新节点按顺序放在画布下方。工具栏的「整理为思维导图」可重新排列全部节点。松手直接连线；已有连线的端点拖到空白处松手即可断开，多条线共享圆点时先点中具体连线。Esc 取消，⌘Z / Ctrl+Z 撤销。点击线上的文字可调整关系。</li><li>中英文阅读栏的框选工具都可截图，松手后进入画布。图片也可以拖入或按 ⌘V / Ctrl+V 粘贴；点击节点图片查看大图，可缩放或查看原始大小。</li><li>选中节点后点「作为 AI 上下文」，预览范围和来源，再复制、导出，或生成新的想法。</li><li>所有数据保存在当前浏览器。用「完整项目」备份，之后可通过「导入文献」恢复。</li></ol><p>快捷键：<span class="kbd">N</span> 新建笔记　<span class="kbd">⌘Z</span> 撤销　<span class="kbd">⌘⇧Z</span> 重做　<span class="kbd">Esc</span> 取消选择</p><p>扫描 PDF 需要先 OCR。复杂版式翻译采用文字块定位；标有虚线的段落可以滚动查看。问答默认使用本机已登录的 Codex，可在服务设置中切换为 API；全文翻译仍需要配置模型 API。</p>`,
   );
 }
 function applyConnection(request, previous = null) {
@@ -2365,7 +2383,11 @@ function bind(id, fn) {
 bind("#library-button", openLibrary);
 bind("#choose-doc", openLibrary);
 bind("#outline-button", openOutline);
-bind("#context-rail", openContext);
+bind("#outline-close", () => closeOutline(true));
+$("#outline-list").onclick = e => {
+  const entry = e.target.closest("[data-outline]");
+  if (entry) jumpFromOutline(entry.dataset.outline);
+};
 bind("#context-button", openContext);
 bind("#settings-button", settings);
 bind("#translation-settings", settings);
@@ -2497,7 +2519,7 @@ $("#selection-question-form").onsubmit = (e) => {
   const q = $("#selection-question").value.trim();
   if (excerptMode === "question" && q && activeExcerpt) runNodeAI(activeExcerpt, q);
 };
-bind("#projects-button", openProjects);
+
 bind("#project-name", () => {
   modal(
     "工作台名称",
@@ -2802,7 +2824,7 @@ $("#nodes").addEventListener("keydown", (e) => {
   }
   if (e.key === "Enter" && e.target.matches(".node")) {
     e.preventDefault();
-    startInlineEdit(e.target.dataset.nodeId, "text");
+    if(e.altKey)revealSource(e.target.dataset.nodeId);else startInlineEdit(e.target.dataset.nodeId, "text");
   }
 });
 $("#edge-paths").onclick = (e) => {
@@ -2840,7 +2862,7 @@ $("#edge-paths").onkeydown = (e) => {
   }
 };
 $("#canvas").addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || e.target.closest(".canvas-outline-control")) return;
   nodeWasDragged = false;
   const endpoint = e.target.closest(".edge-endpoint");
   if (endpoint) {
@@ -3128,7 +3150,7 @@ $("#canvas").addEventListener(
   "wheel",
   (e) => {
     if (drag?.type === "resize") { e.preventDefault(); return; }
-    if (e.target.closest(".node-body")) return;
+    if (e.target.closest(".node-body,.canvas-outline-control")) return;
     e.preventDefault();
     const r = $("#canvas").getBoundingClientRect();
     zoom(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
@@ -3177,6 +3199,7 @@ $("#canvas").ondrop = (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("dialog")) return;
   if (e.key === "Escape") {
+    if (!$("#canvas-outline").classList.contains("hidden")) { e.preventDefault(); closeOutline(true); return; }
     if (drag?.type === "resize") { cancelNodeResize(); return; }
     if (crop) { stopCrop(); return; }
     if (workspaceFullscreen) { e.preventDefault(); toggleWorkspaceFullscreen(); return; }
@@ -3219,6 +3242,17 @@ function refreshWorkspaceSize() {
 window.addEventListener("resize", refreshWorkspaceSize);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") writeSaved(state).catch(() => {});
+});
+projectSidebar=mountProjectSidebar({
+  current:()=>state,list:listSavedProjects,esc,icon,onResize:refreshWorkspaceSize,onError:toast,
+  open:async id=>{const saved=await readSavedProject(id);if(!saved)throw new Error("未找到项目，请刷新列表或使用备份恢复");await switchProject(saved);},
+  backup:async id=>{
+    if(id===state.projectId){inlineEditor.finish();clearTimeout(saveTimer);await writeSaved(state);}
+    const saved=await readSavedProject(id);if(!saved)throw new Error("未找到项目，请刷新列表");
+    const copy=structuredClone(saved);delete copy.config;delete copy._cloudRevision;
+    download(copy.title+".folio.json",JSON.stringify(copy,null,2));
+  },
+  create:createProjectDialog,importProject:()=>$("#file-input").click(),
 });
 hydrate();
 $("#project-name").textContent = state.title;
@@ -3274,7 +3308,7 @@ if(isCloud){
     refreshing=true;const previous=state;
     try{const next=await cloudRefresh(previous);if(next&&state===previous&&!inlineEditor.active&&!editorId&&!busy.size&&!boardChat?.busy&&!drag){
       clearTimeout(saveTimer);state=next;selected.clear();undoStack=[];redoStack=[];
-      document.querySelector('#project-name').textContent=state.title;renderCanvas();await renderReader();toast('已接收云端更新（其他设备或飞书）');
+      document.querySelector('#project-name').textContent=state.title;renderCanvas();projectSidebar?.refresh();await renderReader();toast('已接收云端更新（其他设备或飞书）');
     }}catch(e){document.querySelector('#save-status').textContent=e.status===401?'登录已过期':'云端暂不可达，草稿保留在此浏览器';}finally{refreshing=false;}
   },15000);
 }

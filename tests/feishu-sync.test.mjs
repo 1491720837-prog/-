@@ -47,7 +47,7 @@ test('readback acknowledgement preserves old baseline, rejects stale versions an
  const root=await mkdtemp(join(tmpdir(),'folio-sync-'));
  try{
   const sync=new FeishuSync({root});await sync.ready;
-  sync.state.enabled=true;sync.state.projects.p={title:'P',incoming:{token:'t'},formatVersion:2};
+  sync.state.enabled=true;sync.state.projects.p={title:'P',incoming:{token:'t'},formatVersion:3};
   const dir=join(root,'p');await mkdir(dir);
   const snapshot={projectId:'p',title:'P',nodes:[{id:'n',title:'old'}],docs:[],edges:[]};
   await writeFile(join(dir,'readback-base.json'),JSON.stringify({snapshot,items:[]}));
@@ -60,5 +60,20 @@ test('readback acknowledgement preserves old baseline, rejects stale versions an
   assert.equal(JSON.parse(await readFile(join(dir,'readback-base.json'),'utf8')).snapshot.nodes[0].title,'new');
   assert.equal(sync.state.projects.p.incoming,undefined);
   assert.deepEqual(await sync.enqueue({...snapshot,nodes:[{id:'n',title:'new'}]}),{unchanged:true});
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('network failures do not become permanent content conflicts; existing conflicts remain protected',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'folio-retry-'));
+ try{
+  await writeFile(join(root,'state.json'),JSON.stringify({enabled:true,projects:{p:{doc:'d',nodeBlocks:{},status:'conflict',message:'lookup open.feishu.cn: no such host',remoteHash:contentSignature('<p>old</p>')},real:{status:'conflict',message:'正文被修改'}}}));
+  const sync=new FeishuSync({root});await sync.ready;
+  assert.equal(sync.state.projects.p.status,'failed');assert.equal(sync.state.projects.real.status,'conflict');
+  sync.readbackBase=async()=>({snapshot:{nodes:[]},items:[]});
+  sync.fetch=async()=>{throw Error('read: operation timed out');};
+  await assert.rejects(sync.pull('p'),/timed out/);assert.equal(sync.state.projects.p.status,'failed');
+  sync.fetch=async()=>({content:'<p>old</p>'});
+  assert.deepEqual(await sync.pull('p'),{unchanged:true});
+  await assert.rejects(sync.enqueue({projectId:'real',title:'R',nodes:[],edges:[],docs:[]}),/暂停/);
  }finally{await rm(root,{recursive:true,force:true});}
 });

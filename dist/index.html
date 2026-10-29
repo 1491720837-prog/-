@@ -19,14 +19,15 @@
   <body>
     <div id="app">
       <header class="topbar">
+        <button id="projects-button" class="icon-button" title="收起项目栏" aria-label="项目目录" aria-expanded="true" aria-controls="project-sidebar" data-icon="panel"></button>
         <a class="brand" href="./" aria-label="页间首页"
           ><span class="brandmark">f</span><strong>页间</strong
           ><span>FOLIO</span></a
         ><span class="top-divider"></span
         ><button id="project-name" class="project-name" title="重命名工作台">
           主动阅读 · 从信息到理解</button
-        ><button id="projects-button" class="button subtle" title="保存与切换阅读项目">项目</button><span class="workspace-tag">个人工作台</span>
-        <div class="top-actions"><a class="button subtle" href="/online.html" target="_blank" rel="noopener">在线与本机</a><button id="feishu-sync-button" class="button subtle" title="同步节点、图片和原文件到飞书">飞书同步</button>
+        ><span class="workspace-tag">个人工作台</span>
+        <div class="top-actions"><button id="help-button" class="icon-button" title="使用指南" aria-label="使用指南" data-icon="help"></button><button id="settings-button" class="icon-button" title="服务设置" aria-label="服务设置" data-icon="settings"></button><a class="button subtle" href="/online.html" target="_blank" rel="noopener">在线与本机</a><button id="feishu-sync-button" class="button subtle" title="同步节点、图片和原文件到飞书">飞书同步</button>
           <span id="save-status" class="save-status"><i></i> 已保存到本机</span
           ><button
             id="export-button"
@@ -40,47 +41,15 @@
         </div>
       </header>
       <div class="workspace">
-        <nav class="rail" aria-label="工作台工具">
-          <button
-            class="rail-button active"
-            id="library-button"
-            title="文献库"
-            aria-label="文献库"
-            data-icon="book"
-          ></button
-          ><button
-            class="rail-button"
-            id="outline-button"
-            title="节点大纲"
-            aria-label="节点大纲"
-            data-icon="layers"
-          ></button
-          ><button
-            class="rail-button"
-            id="context-rail"
-            title="AI 上下文"
-            aria-label="AI 上下文"
-            data-icon="spark"
-          ></button>
-          <div class="rail-spacer"></div>
-          <button
-            class="rail-button"
-            id="help-button"
-            title="使用指南"
-            aria-label="使用指南"
-            data-icon="help"
-          ></button
-          ><button
-            class="rail-button"
-            id="settings-button"
-            title="服务设置"
-            aria-label="服务设置"
-            data-icon="settings"
-          ></button>
-          <div class="avatar">我</div>
-        </nav>
+        <aside id="project-sidebar" class="project-sidebar" aria-label="项目目录">
+          <div class="project-sidebar-heading"><strong>项目 <span id="project-total"></span></strong><div><button id="projects-refresh" class="icon-button" title="刷新项目列表" aria-label="刷新项目列表" data-icon="sync"></button><button id="projects-collapse" class="icon-button" title="收起项目栏" aria-label="收起项目栏" data-icon="panel"></button></div></div>
+          <label class="project-search"><span data-icon="search"></span><input type="search" placeholder="搜索项目或资料…" aria-label="搜索项目或资料"></label>
+          <div id="project-directory-error" role="status"></div>
+          <nav id="project-directory" aria-label="全部项目"></nav>
+          <div class="project-sidebar-footer"><button id="new-project" class="button" data-icon="plus">新建项目</button><button id="import-project" class="small-button" data-icon="download">导入项目备份</button></div>
+        </aside>
         <main class="panels" id="panels">
-          <section class="content-workspace" aria-label="内容工作台"><div class="content-header"><strong>01 内容工作台</strong><span>文献 · 播客 · 文章</span></div><div class="content-panes">
+          <section class="content-workspace" aria-label="内容工作台"><div class="content-header"><strong>01 内容工作台</strong><button id="library-button" class="small-button" title="查看当前项目的全部资料" data-icon="book">资料库</button></div><div class="content-panes">
           <section class="reader-panel english-panel">
             <div class="panel-header">
               <span class="panel-title"
@@ -269,6 +238,14 @@
               tabindex="0"
               aria-label="思考画布，可拖动背景平移，滚轮缩放，粘贴图片"
             >
+              <div class="canvas-outline-control">
+                <button id="outline-button" class="button subtle" data-icon="layers" aria-expanded="false" aria-controls="canvas-outline">节点大纲</button>
+                <section id="canvas-outline" class="canvas-outline hidden" aria-label="节点大纲">
+                  <div class="outline-heading"><strong>节点大纲</strong><button id="outline-close" class="icon-button" aria-label="关闭节点大纲" data-icon="close"></button></div>
+                  <p id="outline-summary"></p>
+                  <div id="outline-list" class="outline-list"></div>
+                </section>
+              </div>
               <div class="canvas-intro">
                 <span class="eyebrow">A SPACE FOR YOUR THOUGHTS</span
                 ><span>让想法在这里，慢慢发生连接。</span>

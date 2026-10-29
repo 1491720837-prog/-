@@ -21,7 +21,7 @@ try{
  await expect(page.locator('#capture-button')).toHaveText('采集箱 · 1');await page.reload();await expect(page.locator('#capture-button')).toHaveText('采集箱 · 1');
  await page.locator('#capture-button').click();await page.getByRole('button',{name:'保存到工作台',exact:true}).click();
  await expect(page.locator('#project-name')).toHaveText('采集验证文章');await expect(page.locator('#english-paper')).toContainText('图片后面的解释');await expect(page.locator('#english-paper img')).toHaveCount(1);await expect(page.locator('.node')).toHaveCount(0);
- await page.locator('#projects-button').click();await expect(page.locator('.project-entry')).toHaveCount(2);await expect(page.locator('.project-entry').filter({hasText:'主动阅读'})).toContainText('5 个节点');
- await page.locator('.project-entry').filter({hasText:'主动阅读'}).getByRole('button',{name:'打开项目',exact:true}).click();await expect(page.locator('.node')).toHaveCount(5);
+ if(await page.locator('#projects-button').getAttribute('aria-expanded')==='false')await page.locator('#projects-button').click();await expect(page.locator('#project-sidebar .project-entry')).toHaveCount(2);await expect(page.locator('#project-sidebar .project-entry').filter({hasText:'主动阅读'})).toContainText('5 个节点');
+ await page.locator('#project-sidebar .project-entry').filter({hasText:'主动阅读'}).getByRole('button',{name:'打开项目',exact:true}).click();await expect(page.locator('.node')).toHaveCount(5);
  assert.deepEqual(errors,[]);console.log('PASS: visible article/selection extraction, image placement, durable capture inbox, separate project import, original nodes preserved');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

@@ -14,7 +14,11 @@
     "companion": "node scripts/companion.mjs",
     "companion:pair": "node scripts/companion.mjs --pair",
     "test:chat-ui": "node scripts/chat-e2e.mjs",
-    "test:capture-ui": "node scripts/capture-e2e.mjs"
+    "test:capture-ui": "node scripts/capture-e2e.mjs",
+    "test:outline-ui": "node scripts/outline-e2e.mjs",
+    "test:projects-ui": "node scripts/projects-e2e.mjs",
+    "test:sources-ui": "node scripts/sources-e2e.mjs",
+    "test:node-reading-ui": "node scripts/node-reading-e2e.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "5.4.624"

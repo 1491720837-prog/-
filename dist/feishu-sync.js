@@ -14,7 +14,7 @@ export function createFeishuSync({list,read,apply,answerComment,onStatus}){
  async function send(id){if(!enabled)return;try{
   if(!await receive(id))return;
   const s=await read(id);if(!s)return;const snapshot=projectSnapshot(s),d=await digest(snapshot);
-  if(last.get(id)===d)return;const result=await api('sync',snapshot);last.set(id,d);if(!result.unchanged)onStatus('飞书：待同步');
+  if(last.get(id)===d){const current=(await api('status')).projects.find(p=>p.id===id);if(['synced','queued','syncing'].includes(current?.status))return;}const result=await api('sync',snapshot);last.set(id,d);if(!result.unchanged)onStatus('飞书：待同步');
  }catch(e){onStatus('飞书：'+e.message);}}
  // Serialize incoming merges and outgoing snapshots, including across browser tabs.
  let chain=Promise.resolve();

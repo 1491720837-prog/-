@@ -1,11 +1,11 @@
 import {askAI,askCodex,readingSystem,parseJSON} from './ai.js';
-import {collectLiterature} from './literature.js';
+import {collectProjectLiterature} from './literature.js';
 import {contextText,uid} from './model.js';
-import {chatHistory,transcriptChunks,validateOutline,selectedChatText} from './board-chat-model.js';
+import {chatHistory,transcriptChunks,validateOutline,selectedChatText,projectReadingSystem,requireProjectSourceGateway} from './board-chat-model.js';
 import {mountModelPicker} from './model-picker.js';
 export function mountBoardChat({root,getState,getSelected,persist,onNode,onOutline,toast,onSettings,onResize,preferences=async()=>''}){
   const q=s=>root.querySelector(s);let controller,owner,picker,selection='',selectedMessage='',renderedProject='',outlinePhase='',drafts=new Map();
-  root.innerHTML=`<div class="panel-header"><strong>AI 对话</strong><button class="small-button" id="board-chat-close" aria-label="收起 AI 对话">收起</button></div><div class="chat-context"><strong id="board-chat-project"></strong><label><input type="checkbox" id="chat-docs" checked> 项目全部资料</label><select id="chat-scope" aria-label="画布上下文范围"><option value="all">整个画布</option><option value="selected">仅选中节点</option><option value="none">不附带节点</option></select><small id="chat-context-description"></small><small>内容作为阅读材料发送；切换范围不会抹去此前对话。</small></div><div id="board-messages" class="board-messages" aria-label="本项目聊天记录"></div><div id="chat-status" role="status"></div><div id="chat-selection-actions" hidden><button class="button" id="chat-selection-node" draggable="true">将选中文字拖到画布 / 点击成节点</button></div><div class="chat-composer"><button class="button subtle" id="podcast-outline">整理播客内容 → 节点大纲</button><form id="board-chat-form"><textarea id="board-chat-input" rows="3" placeholder="围绕这个画布，继续思考…" aria-label="向画布 AI 提问"></textarea><div class="chat-composer-actions"><div class="model-picker"><button type="button" class="model-picker-trigger" aria-haspopup="menu" aria-expanded="false"><span>选择模型</span>⌄</button><div class="model-picker-menu" role="menu" hidden></div></div><button type="button" class="button" id="chat-stop" hidden>停止</button><button class="button primary" id="chat-send">发送</button></div></form><small>选中回答文字可拖入画布；整条消息也可拖动「拖入画布」。</small></div>`;
+  root.innerHTML=`<div class="panel-header"><strong>AI 对话</strong><button class="small-button" id="board-chat-close" aria-label="收起 AI 对话">收起</button></div><div class="chat-context"><strong id="board-chat-project"></strong><span class="chat-source-required">原始资料 · 每次提问自动读取</span><select id="chat-scope" aria-label="画布上下文范围"><option value="all">整个画布</option><option value="selected">仅选中节点</option><option value="none">不附带节点</option></select><small id="chat-context-description"></small><small>PDF 原文、完整逐字稿和文章正文始终纳入；上方范围只控制额外附带的画布节点。</small></div><div id="board-messages" class="board-messages" aria-label="本项目聊天记录"></div><div id="chat-status" role="status"></div><div id="chat-selection-actions" hidden><button class="button" id="chat-selection-node" draggable="true">将选中文字拖到画布 / 点击成节点</button></div><div class="chat-composer"><button class="button subtle" id="podcast-outline">整理播客内容 → 节点大纲</button><form id="board-chat-form"><textarea id="board-chat-input" rows="3" placeholder="围绕这个画布，继续思考…" aria-label="向画布 AI 提问"></textarea><div class="chat-composer-actions"><div class="model-picker"><button type="button" class="model-picker-trigger" aria-haspopup="menu" aria-expanded="false"><span>选择模型</span>⌄</button><div class="model-picker-menu" role="menu" hidden></div></div><button type="button" class="button" id="chat-stop" hidden>停止</button><button class="button primary" id="chat-send">发送</button></div></form><small>选中回答文字可拖入画布；整条消息也可拖动「拖入画布」。</small></div>`;
   const ensure=(create=false)=>{const state=getState();if(create&&!state.chat)state.chat={id:uid(),messages:[]};return state.chat||{messages:[]};};
   function showProgress(text){if(getState()===owner)q('#chat-status').textContent=text;}
   function render(){
@@ -20,6 +20,12 @@ export function mountBoardChat({root,getState,getSelected,persist,onNode,onOutli
       const body=document.createElement('div');body.className='chat-message-text';body.textContent=m.text;card.append(header,body);
       if(m.error||(m.pending&&!controller)){const error=document.createElement('p');error.className='chat-error';error.textContent=m.error||'上次生成已中断，请重新提问';card.append(error);}
       if(m.text&&!m.pending){const button=document.createElement('button');button.className='small-button';button.textContent='拖入画布';button.draggable=true;button.onclick=()=>onNode(m,m.text);button.ondragstart=e=>drag(e,m,m.text);card.append(button);}
+      if(m.evidence?.documents){
+        const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent=`本次可查阅的原始资料 · ${m.evidence.documents.length} 份`;details.append(summary);
+        for(const d of m.evidence.documents){const line=document.createElement('p');line.textContent=`${d.name} · ${d.parts} ${d.kind==='pdf'?'页':'个文本分块'} · ${d.characters} 字符`;details.append(line);}
+        for(const warning of m.evidence.warnings||[]){const line=document.createElement('p');line.className='chat-error';line.textContent=warning;details.append(line);}
+        const note=document.createElement('p');note.textContent='全文可供检索；此目录不代表 AI 已逐页读完。';details.append(note);card.append(details);
+      }
       if(m.threadId){const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Codex 会话';details.append(summary,document.createTextNode(m.threadId));card.append(details);}
       list.append(card);
     }
@@ -33,30 +39,34 @@ export function mountBoardChat({root,getState,getSelected,persist,onNode,onOutli
   q('#chat-selection-node').onclick=()=>{const m=selected();if(m)onNode(m,selectedChatText(m,selection));};q('#chat-selection-node').ondragstart=e=>{const m=selected();if(m)drag(e,m,selectedChatText(m,selection));};
   q('#board-chat-input').oninput=()=>drafts.set(getState().projectId,q('#board-chat-input').value);
   q('#board-chat-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();q('#board-chat-form').requestSubmit();}};
-  const request=async(messages,config,literature,conversation)=>config.readingProvider==='api'?{content:await askAI(messages,config,controller.signal,{literature}),model:config.model||'API 服务默认',provider:'api'}:askCodex(messages,config,controller.signal,{literature,conversation,onEvent:e=>{if(e.type==='status')showProgress((outlinePhase?outlinePhase+' · ':'')+e.message);}});
+  const request=async(messages,config,literature,conversation)=>config.readingProvider==='api'?await askAI(messages,config,controller.signal,{literature,returnEvidence:true}):askCodex(messages,config,controller.signal,{literature,conversation,onEvent:e=>{if(e.type==='status')showProgress((outlinePhase?outlinePhase+' · ':'')+e.message);}});
   async function send(prompt,outline=false){
     if(controller||!prompt.trim())return;if(prompt.length>20000)return toast('问题过长，请分段提问');
-    owner=getState();const workspace=owner,chat=ensure(true),config={...workspace.config},scope=q('#chat-scope').value,docIds=q('#chat-docs').checked?workspace.docs.map(d=>d.id):[],nodes=scope==='all'?workspace.nodes:scope==='selected'?workspace.nodes.filter(n=>getSelected().has(n.id)):[];
+    owner=getState();const workspace=owner,chat=ensure(true),config={...workspace.config},scope=q('#chat-scope').value,nodes=scope==='all'?workspace.nodes:scope==='selected'?workspace.nodes.filter(n=>getSelected().has(n.id)):[];
     for(const m of chat.messages)if(m.pending){delete m.pending;m.error='上次生成已中断，请重新提问';}
     if(chat.messages.length>995)return toast('聊天记录已满，请导出备份后另建项目');
     const user={id:uid(),role:'user',text:prompt,at:new Date().toISOString()},reply={id:uid(),role:'assistant',text:'',pending:true,at:new Date().toISOString()};chat.messages.push(user,reply);controller=new AbortController();q('#board-chat-input').value='';drafts.delete(workspace.projectId);render();
     try{
-      await persist(workspace);const savedNodes=structuredClone(nodes),savedDocs=structuredClone(workspace.docs);
+      const savedNodes=structuredClone(nodes),savedDocs=structuredClone(workspace.docs),snapshot={...workspace,docs:savedDocs};
+      requireProjectSourceGateway(config,location.href);
+      await persist(workspace);
+      showProgress('正在读取项目原始资料…');
+      const literature=await collectProjectLiterature(snapshot,savedNodes,{signal:controller.signal,onProgress:showProgress});
+      reply.evidence={provider:config.readingProvider==='api'?'api':'codex',documents:literature.documents,attached:literature.attached,warnings:literature.warnings};
       if(outline){
-        const doc=workspace.docs.find(d=>d.id===workspace.activeDoc&&d.contentKind==='podcast')||workspace.docs.find(d=>d.contentKind==='podcast');if(!doc)throw Error('请先导入播客逐字稿');
+        const doc=savedDocs.find(d=>d.id===snapshot.activeDoc&&d.contentKind==='podcast')||savedDocs.find(d=>d.contentKind==='podcast');if(!doc)throw Error('请先导入播客逐字稿');
         const chunks=transcriptChunks(doc.text),notes=[];
-        for(let i=0;i<chunks.length;i++){outlinePhase=`正在整理逐字稿 ${i+1} / ${chunks.length} 段`;showProgress(outlinePhase+'…');const part=await request([{role:'system',content:readingSystem+'完整阅读本次逐字稿片段，提取主要论点、论据、分歧与具体案例。保留已有时间戳和简短原文证据，区分发言与推断。不要把片段当作整期节目。输出精炼、至多 2500 字的整理。'},{role:'user',content:chunks[i]}],config);notes.push(part.content);}
-        outlinePhase='正在生成层级节点';showProgress(outlinePhase+'…');const result=await request([{role:'system',content:readingSystem+'依据各片段整理生成完整播客的思维导图。只返回 JSON {"nodes":[{"id":"n1","parentId":null,"title":"主题","text":"完整说明","quote":"简短逐字原文（没有就空）","timestamp":"原有时间戳（没有就空）"}]}。1–60 个节点，父节点必须出现在子节点之前，id 唯一，层级不限。覆盖主题、观点、案例、分歧和可追问问题，避免重复。'},{role:'user',content:doc.name+'\n\n'+notes.join('\n\n')}],config);
+        for(let i=0;i<chunks.length;i++){outlinePhase=`正在整理逐字稿 ${i+1} / ${chunks.length} 段`;showProgress(outlinePhase+'…');const part=await request([{role:'system',content:readingSystem+'完整阅读本次逐字稿片段，提取主要论点、论据、分歧与具体案例。保留已有时间戳和简短原文证据，区分发言与推断。不要把片段当作整期节目。输出精炼、至多 2500 字的整理。'},{role:'user',content:chunks[i]}],config,literature);notes.push(part.content);}
+        outlinePhase='正在生成层级节点';showProgress(outlinePhase+'…');const result=await request([{role:'system',content:readingSystem+'依据各片段整理生成完整播客的思维导图。只返回 JSON {"nodes":[{"id":"n1","parentId":null,"title":"主题","text":"完整说明","quote":"简短逐字原文（没有就空）","timestamp":"原有时间戳（没有就空）"}]}。1–60 个节点，父节点必须出现在子节点之前，id 唯一，层级不限。覆盖主题、观点、案例、分歧和可追问问题，避免重复。'},{role:'user',content:doc.name+'\n\n'+notes.join('\n\n')}],config,literature);
         const plan=validateOutline(parseJSON(result.content),doc);if(getState()!==workspace)throw Error('项目已切换，未写入节点，请回原项目重试');
         Object.assign(reply,{text:plan.map(n=>(n.parentId?'  • ':'• ')+n.title+'\n'+n.text).join('\n\n'),model:result.model,reasoningEffort:result.reasoningEffort,source:{docId:doc.id,page:1,side:'en',text:''}});
         onOutline(plan,doc,reply.id);reply.outlineCreated=true;
       }else{
-        const literature=await collectLiterature({...workspace,docs:savedDocs},savedNodes,{docIds,signal:controller.signal,onProgress:showProgress});
-        const context=contextText(workspace,savedNodes,{sources:true,history:true,translation:true});if(context.length>100000)throw Error('画布文字过多，请选择“仅选中节点”缩小范围');
-        const messages=[{role:'system',content:readingSystem+await preferences(workspace.projectId)},{role:'user',content:'当前项目与画布材料：\n'+context+literature.context},...chatHistory(chat.messages.filter(m=>m!==reply))];
+        const context=contextText(snapshot,savedNodes,{sources:true,history:true,translation:true});if(context.length>100000)throw Error('画布文字过多，请选择“仅选中节点”缩小范围');
+        const messages=[{role:'system',content:readingSystem+projectReadingSystem+await preferences(workspace.projectId)},{role:'user',content:'当前项目与画布材料：\n'+context+literature.context},...chatHistory(chat.messages.filter(m=>m!==reply))];
         const images=savedNodes.filter(n=>n.image).slice(0,8);if(images.length)messages.push({role:'user',content:[{type:'text',text:'当前节点图片（最多 8 张）'},...images.map(n=>({type:'image_url',image_url:{url:n.image}}))]});
         const result=await request(messages,config,literature,{projectId:workspace.projectId,id:chat.id,title:workspace.title});
-        Object.assign(reply,{text:result.content,model:result.model,reasoningEffort:result.reasoningEffort,threadId:result.threadId,evidence:{provider:result.provider||'api',model:result.model||'API 服务默认',reasoningEffort:result.reasoningEffort,sources:result.sources||[],attached:literature.attached,warnings:literature.warnings,trace:(result.trace||[]).slice(0,40)},prompt:prompt});
+        Object.assign(reply,{text:result.content,model:result.model,reasoningEffort:result.reasoningEffort,threadId:result.threadId,evidence:{provider:result.provider||'api',model:result.model||'API 服务默认',reasoningEffort:result.reasoningEffort,sources:result.sources||[],documents:literature.documents,attached:literature.attached,warnings:literature.warnings,trace:(result.trace||[]).slice(0,40)},prompt:prompt});
         if(savedNodes.length===1&&savedNodes[0].source)reply.source=structuredClone(savedNodes[0].source);
       }
     }catch(e){reply.error=e.message;toast(e.message);}finally{delete reply.pending;controller=null;outlinePhase='';try{await persist(workspace);}catch(e){toast('聊天保存失败：'+e.message);}render();}

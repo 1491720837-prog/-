@@ -40,6 +40,6 @@ export function manifest(pages) {
   return [...docs.values()].map(d=>({...d,...(pages.find(p=>p.docId===d.docId)?.kind?{kind:pages.find(p=>p.docId===d.docId).kind}:{}),emptyPages:d.pages.filter(page=>!pages.find(p=>p.docId===d.docId&&p.side===d.side&&p.page===page).text.trim())}));
 }
 export const literatureTools = [
-  {type:'function',name:'search_document',description:'检索本次提供的文献全文。可用中英文关键词；返回匹配片段和真实 PDF 页码。需要完整上下文时继续读取该页。',inputSchema:{type:'object',properties:{query:{type:'string'},docId:{type:'string'},side:{type:'string',enum:['en','zh']},limit:{type:'integer'}},required:['query'],additionalProperties:false}},
-  {type:'function',name:'read_document_page',description:'读取指定文献的原文或中文 PDF 页面文字。页码是 PDF 页序号。nextOffset 非空时可以继续读取余下文字。',inputSchema:{type:'object',properties:{docId:{type:'string'},side:{type:'string',enum:['en','zh']},page:{type:'integer'},offset:{type:'integer'}},required:['docId','side','page'],additionalProperties:false}},
+  {type:'function',name:'search_document',description:'检索本次提供的 PDF 原文、完整播客逐字稿和文章正文。可用中英文关键词，返回匹配片段及 PDF 页码或文本分块编号。需要完整上下文时继续读取。',inputSchema:{type:'object',properties:{query:{type:'string'},docId:{type:'string'},side:{type:'string',enum:['en','zh']},limit:{type:'integer'}},required:['query'],additionalProperties:false}},
+  {type:'function',name:'read_document_page',description:'读取指定 PDF 的原文/中文页面，或逐字稿/文章的完整文本分块。PDF 的 page 为真实页序号；文本的 page 是分块编号，请按正文已有时间戳/说话人/段落引用。nextOffset 非空时继续读取余下文字。',inputSchema:{type:'object',properties:{docId:{type:'string'},side:{type:'string',enum:['en','zh']},page:{type:'integer'},offset:{type:'integer'}},required:['docId','side','page'],additionalProperties:false}},
 ];
