@@ -50,6 +50,7 @@ import { download, zip, canvasImage } from "./export.js";
 import {openPodcastImport} from './podcast-import.js';
 import {safeWebURL,textParts} from './content-source.js';
 import {installBrowserCapture} from './browser-capture.js';
+import {extractDocument} from './url-import.js';
 const $ = (q, r = document) => r.querySelector(q),
   $$ = (q, r = document) => [...r.querySelectorAll(q)];
 const icons = {
@@ -1344,7 +1345,7 @@ function editNode(id, focusQuestion = false, focusField = null) {
   };
   disposeModelPicker=mountModelPicker($("#followup-form .model-picker"),{
     getConfig:()=>state.config,
-    onSelect:model=>{state.config={...state.config,readingProvider:"codex",codexModel:model};save();checkStatus();},
+    onSelect:applyModelSelection,
     onSettings:settings,
   });
   $("#followup-form").onsubmit = (e) => {
@@ -2168,12 +2169,96 @@ function openContext() {
     }
   };
 }
+function importFromUrl() {
+  const dialog = modal(
+    "链接导入",
+    `<p>粘贴公开文章链接：公众号、博客、新闻页都可以。抓取在本机服务完成，正文和图片顺序会先进入采集箱供你预览，再决定保存为独立项目还是当前项目。</p><label class="field-label" for="url-import-input">文章链接</label><input class="text-field" id="url-import-input" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off" spellcheck="false"><p id="url-import-status" role="status">需要登录、付费或整页由脚本生成的文章无法直接读取，请改用浏览器扩展。</p>`,
+    '<button id="url-import-go" class="button primary">读取正文</button>',
+  );
+  const input = $("#url-import-input", dialog),
+    status = $("#url-import-status", dialog),
+    go = $("#url-import-go", dialog);
+  input.focus();
+  const submit = async () => {
+    const value = input.value.trim();
+    if (!value) {
+      status.textContent = "请先粘贴文章链接";
+      return;
+    }
+    go.disabled = true;
+    status.textContent = "正在读取正文…";
+    try {
+      const response = await fetch("/api/import/url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: value }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "读取失败");
+      const capture = extractDocument(
+        new DOMParser().parseFromString(data.html, "text/html"),
+        data.finalUrl || value,
+      );
+      window.postMessage({ type: "folio-capture", id: crypto.randomUUID(), capture }, location.origin);
+      status.textContent = "已进入采集箱，正在打开预览…";
+      setTimeout(() => {
+        dialog.close();
+        $("#capture-button")?.click();
+      }, 600);
+    } catch (e) {
+      status.textContent = e.message;
+      go.disabled = false;
+    }
+  };
+  go.onclick = submit;
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submit();
+    }
+  });
+}
+let apiAllowlist = [];
+function applyModelSelection(model, meta = {}) {
+  const provider = meta.provider === "api" ? "api" : "codex";
+  state.config = { ...state.config, readingProvider: provider, ...(provider === "api" ? { model } : { codexModel: model }) };
+  save();
+  checkStatus();
+  if (provider === "api" && model && apiAllowlist.length && !apiAllowlist.includes(model))
+    toast("该模型不在 FOLIO_AI_MODELS 中，项目对话会被拒绝");
+}
+async function loadApiModelOptions() {
+  const list = $("#api-model-options");
+  if (!list) return;
+  try {
+    const data = await (await fetch("/api/models")).json();
+    const models = Array.isArray(data.models) ? data.models : [];
+    list.replaceChildren(
+      ...models.filter((m) => m.tools).map((m) => {
+        const option = document.createElement("option");
+        option.value = m.id;
+        option.label = m.context ? `${m.name} · ${Math.round(m.context / 1000)}k` : m.name;
+        return option;
+      }),
+    );
+    const note = $("#api-model-note");
+    if (note)
+      note.textContent = data.error
+        ? `模型列表不可用：${data.error}`
+        : models.length
+          ? `已读取 ${models.filter((m) => m.tools).length} 个支持工具调用的模型。`
+          : "服务端尚未配置 API 服务商，请先在 .env.local 填写 FOLIO_AI_BASE_URL 与 FOLIO_AI_MODEL。";
+  } catch {
+    // The list is a convenience; a missing gateway must not block manual input.
+  }
+}
 function settings() {
   modal(
     "连接阅读助手",
-    `<label class="field-label" for="reading-provider">问答与总结使用</label><select class="select-field" id="reading-provider"><option value="codex" ${(state.config.readingProvider||"codex")==="codex"?"selected":""}>Codex 阅读助手（本机登录）</option><option value="api" ${state.config.readingProvider==="api"?"selected":""}>OpenAI 兼容 API</option></select><p>Codex 会结合摘录、附近页面和分支历史回答，必要时检索本篇全文。使用你的 Codex 账户额度。</p><label class="field-label" for="codex-model">Codex 模型</label><select class="select-field" id="codex-model"><option value="">使用账户默认模型</option>${state.config.codexModel?`<option selected value="${esc(state.config.codexModel)}">${esc(state.config.codexModel)}</option>`:""}</select><button id="check-codex" class="small-button">检查 Codex</button><p id="codex-status">正在检查本机 Codex…</p><hr><p>完整 PDF 翻译使用上方所选 Codex 模型，包含正文和所有图片内的文字，并生成可下载的中文 PDF。下方 API 用于兼容服务问答及纯文本翻译。本机版本通过服务端转发请求，密钥不会进入浏览器或项目导出文件。</p><label class="field-label" for="api-endpoint">工作台网关地址（不是模型厂商地址）</label><input class="text-field" id="api-endpoint" value="${esc(state.config.endpoint || "/api/chat")}" placeholder="/api/chat"><label class="field-label" for="api-model">模型名称（留空使用服务端默认值）</label><input class="text-field" id="api-model" value="${esc(state.config.model || "")}" placeholder="使用你实际可用的模型名称"><details style="margin-top:18px"><summary style="font-size:12px;cursor:pointer">本机配置方法</summary><p>在项目目录复制 <code>.env.example</code> 为 <code>.env.local</code>，填写后重新启动工作台。</p><pre>FOLIO_AI_BASE_URL=https://你的服务商/v1\nFOLIO_AI_MODEL=你的模型名称\nFOLIO_AI_API_KEY=你的密钥</pre><p>运行 <code>npm run dev</code>，打开 <code>http://127.0.0.1:4318</code>。在线预览需使用你部署的 HTTPS 网关；它应接受 OpenAI messages 请求并返回 choices，且允许此站点跨域访问。</p></details><p id="connection-result"></p><label class="field-label">已学习的快捷操作</label><div id="shortcut-list">${state.shortcuts.length ? state.shortcuts.map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;margin:9px 0"><span>${esc(s.label)}</span><button class="small-button" data-remove-shortcut="${s.id}">删除</button></div>`).join("") : "<p>同类提问超过 3 次后，会建议添加新的快捷操作。</p>"}</div>`,
+    `<label class="field-label" for="reading-provider">问答与总结使用</label><select class="select-field" id="reading-provider"><option value="codex" ${(state.config.readingProvider||"codex")==="codex"?"selected":""}>Codex 阅读助手（本机登录）</option><option value="api" ${state.config.readingProvider==="api"?"selected":""}>OpenAI 兼容 API</option></select><p>Codex 会结合摘录、附近页面和分支历史回答，必要时检索本篇全文。使用你的 Codex 账户额度。</p><label class="field-label" for="codex-model">Codex 模型</label><select class="select-field" id="codex-model"><option value="">使用账户默认模型</option>${state.config.codexModel?`<option selected value="${esc(state.config.codexModel)}">${esc(state.config.codexModel)}</option>`:""}</select><button id="check-codex" class="small-button">检查 Codex</button><p id="codex-status">正在检查本机 Codex…</p><hr><p>完整 PDF 翻译使用上方所选 Codex 模型，包含正文和所有图片内的文字，并生成可下载的中文 PDF。下方 API 用于兼容服务问答及纯文本翻译。本机版本通过服务端转发请求，密钥不会进入浏览器或项目导出文件。</p><label class="field-label" for="api-endpoint">工作台网关地址（不是模型厂商地址）</label><input class="text-field" id="api-endpoint" value="${esc(state.config.endpoint || "/api/chat")}" placeholder="/api/chat"><label class="field-label" for="api-model">模型名称（留空使用服务端默认值）</label><input class="text-field" id="api-model" list="api-model-options" value="${esc(state.config.model || "")}" placeholder="输入或从列表选择模型 ID"><datalist id="api-model-options"></datalist><p id="api-model-note">模型列表来自工作台服务端，只列出支持工具调用的模型；项目对话需要检索全文。</p><details style="margin-top:18px"><summary style="font-size:12px;cursor:pointer">本机配置方法</summary><p>在项目目录复制 <code>.env.example</code> 为 <code>.env.local</code>，填写后重新启动工作台。</p><pre>FOLIO_AI_BASE_URL=https://你的服务商/v1\nFOLIO_AI_MODEL=你的模型名称\nFOLIO_AI_API_KEY=你的密钥</pre><p>运行 <code>npm run dev</code>，打开 <code>http://127.0.0.1:4318</code>。在线预览需使用你部署的 HTTPS 网关；它应接受 OpenAI messages 请求并返回 choices，且允许此站点跨域访问。</p></details><p id="connection-result"></p><label class="field-label">已学习的快捷操作</label><div id="shortcut-list">${state.shortcuts.length ? state.shortcuts.map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;margin:9px 0"><span>${esc(s.label)}</span><button class="small-button" data-remove-shortcut="${s.id}">删除</button></div>`).join("") : "<p>同类提问超过 3 次后，会建议添加新的快捷操作。</p>"}</div>`,
     `<button id="test-connection" class="button">测试连接</button><button id="save-settings" class="button primary">保存设置</button>`,
   );
+  loadApiModelOptions();
   $("#save-settings").onclick = () => {
     const endpoint = $("#api-endpoint").value.trim() || "/api/chat";
     try {
@@ -2184,7 +2269,7 @@ function settings() {
       save();
       $("#modal").close();
       checkStatus();
-      toast("设置已保存");
+      toast(state.config.model && apiAllowlist.length && !apiAllowlist.includes(state.config.model) ? "已保存；该模型不在 FOLIO_AI_MODELS 中，项目对话会被拒绝" : "设置已保存");
     } catch (e) {
       toast(e.message);
     }
@@ -2253,6 +2338,7 @@ async function checkStatus() {
     const r = await fetch("/api/status");
     if (!r.ok) throw new Error();
     const data = await r.json();
+    apiAllowlist = Array.isArray(data.models) ? data.models : [];
     $("#ai-status").textContent = data.configured ? "AI 已配置" : "AI 待连接";
   } catch {
     $("#ai-status").textContent = "AI 待连接";
@@ -2402,6 +2488,7 @@ async function importContentResult(result){
 }
 bind('#podcast-button',()=>openPodcastImport({modal,esc,projectId:()=>state.projectId,uid,download,toast,onImport:importContentResult}));
 installBrowserCapture({button:$('#capture-button'),modal,esc,uid,projectId:()=>state.projectId,onImport:importContentResult,toast});
+bind('#url-import-button',importFromUrl);
 boardChat=mountBoardChat({root:$('#board-chat'),getState:()=>state,getSelected:()=>selected,persist:async workspace=>{clearTimeout(saveTimer);await writeSaved(workspace);if(state===workspace)$("#save-status").innerHTML=isCloud?"<i></i> 已保存到云端":"<i></i> 已保存到本机";},toast,onSettings:settings,onResize:refreshWorkspaceSize,preferences:readingPreferences,
   onNode(message,text,position){checkpoint();const n=makeNode({kind:message.role==='assistant'?'ai':'note',title:text.split('\n')[0].slice(0,100)||'聊天摘录',text,prompt:message.prompt||'',source:message.source?structuredClone(message.source):undefined,chatSource:{chatId:state.chat.id,messageId:message.id,role:message.role,model:message.model,at:message.at},aiEvidence:message.evidence?{...message.evidence,provider:message.evidence.provider||(message.threadId?'codex':'api'),model:message.model||'API 服务默认',trace:message.evidence.trace||[]}:undefined});if(position)Object.assign(n,position);selected=new Set([n.id]);changed();centerNode(n.id);},
   onOutline(plan,doc,messageId){checkpoint();const ids=new Map();for(const item of plan){const n=makeNode({kind:'ai',title:item.title,text:item.text+(item.timestamp?'\n\n时间：'+item.timestamp:''),prompt:'整理播客内容',source:{docId:doc.id,page:1,side:'en',text:item.quote,selectedText:item.quote},chatSource:{chatId:state.chat.id,messageId,role:'assistant'}},ids.get(item.parentId)||null);ids.set(item.id,n.id);}changed();boardChat?.render();toast('已生成 '+plan.length+' 个节点；开启飞书同步后会自动更新文档');}

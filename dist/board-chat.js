@@ -73,7 +73,7 @@ export function mountBoardChat({root,getState,getSelected,persist,onNode,onOutli
   }
   q('#board-chat-form').onsubmit=e=>{e.preventDefault();send(q('#board-chat-input').value);};q('#podcast-outline').onclick=()=>send('整理播客内容，生成可继续阅读和扩展的节点大纲。',true);q('#chat-stop').onclick=()=>controller?.abort();
   q('#board-chat-close').onclick=()=>toggle(false);
-  picker=mountModelPicker(q('.model-picker'),{getConfig:()=>getState().config,onSelect:id=>{getState().config.codexModel=id;getState().config.readingProvider='codex';persist(getState()).catch(e=>toast(e.message));},onSettings});
+  picker=mountModelPicker(q('.model-picker'),{getConfig:()=>getState().config,onSelect:(id,meta)=>{const c=getState();c.config.readingProvider=meta?.provider==='api'?'api':'codex';if(meta?.provider==='api')c.config.model=id;else c.config.codexModel=id;persist(c).catch(e=>toast(e.message));},onSettings});
   function toggle(show=root.classList.contains('hidden')){root.classList.toggle('hidden',!show);document.querySelector('#chat-toggle')?.setAttribute('aria-pressed',String(show));onResize();if(show){render();q('#board-chat-input').focus();}}
   render();return {render,toggle,get busy(){return !!controller;},drop(data,position){if(data.projectId!==getState().projectId)throw Error('不能把其他项目的聊天直接写入当前画布');const m=ensure().messages.find(m=>m.id===data.messageId);if(!m||m.pending||!m.text)throw Error('消息不存在或仍在生成');onNode(m,selectedChatText(m,data.text),position);}};
 }

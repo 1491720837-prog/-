@@ -65,10 +65,26 @@ PDF.js 阅读端与解析 Worker 均使用同版本的官方 `legacy` 构建，�
 ```dotenv
 FOLIO_AI_BASE_URL=https://你的服务商/v1
 FOLIO_AI_MODEL=你的实际模型名称
+FOLIO_AI_MODELS=模型一,模型二
 FOLIO_AI_API_KEY=你的密钥
 ```
 
+`FOLIO_AI_MODELS` 是**允许在界面里选择的模型清单**，英文逗号分隔；不填时只允许 `FOLIO_AI_MODEL` 一个。项目对话必须携带全文检索工具，所以只能选支持 tool calling 的模型：选了不在清单里的模型会直接报“未在允许列表中”，而不是静默跳过检索。
+
+以 OpenRouter 为例：
+
+```dotenv
+FOLIO_AI_BASE_URL=https://openrouter.ai/api/v1
+FOLIO_AI_MODEL=anthropic/claude-sonnet-5.5
+FOLIO_AI_MODELS=anthropic/claude-sonnet-5.5,openai/gpt-6.1-terra-pro,google/gemini-4-argon,deepseek/deepseek-v4.1-flash
+FOLIO_AI_API_KEY=sk-or-v1-你的密钥
+```
+
 重启服务。在界面顶部“服务设置”里保持网关地址 `/api/chat`，将“问答与总结使用”切换为“OpenAI 兼容 API”，点击“测试连接”。网关在上述 Base URL 后追加 `/chat/completions`。图片问答需选择支持图片输入的模型。密钥仅由本地服务端读取，不进入网页、浏览器存储或导出文件。
+
+**选择模型。**“模型名称”支持输入和下拉：列表来自工作台服务端的 `GET /api/models`（代理服务商模型目录，密钥不出服务端），只列支持 tool calling 的模型并标注上下文长度，输入框仍可手填清单内的任意 ID。输入框下方的模型按钮把 Codex 模型与 API 模型分成两组，选中 API 模型会自动把“问答与总结使用”切到 OpenAI 兼容 API。
+
+**数据政策。**Base URL 指向 `openrouter.ai` 时，请求默认带 `provider.data_collection: "deny"`，避免文献被上游用于训练；其他服务商要启用可设 `FOLIO_AI_DATA_COLLECTION=deny`，明确放行则设 `allow`。
 
 Ollama 也可使用 `http://localhost:11434/v1`，填写已安装的模型，省略密钥。
 
