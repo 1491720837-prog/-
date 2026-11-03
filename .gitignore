@@ -8,3 +8,7 @@ artifacts/
 data/
 .folio-companion/
 backups/
+
+# Cloudflare Tunnel 的隧道凭证与实例配置，绝不入库
+deploy/cloudflared/config.yml
+deploy/cloudflared/*.json

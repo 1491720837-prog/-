@@ -1,0 +1,13 @@
+# Cloudflare Tunnel 配置模板。
+# 复制成 config.yml 并把 TUNNEL_ID / 域名 换成你自己的：
+#   cp deploy/cloudflared/config.example.yml deploy/cloudflared/config.yml
+# config.yml 和 *.json 凭证都在 .gitignore 里，不会进仓库。
+tunnel: TUNNEL_ID
+credentials-file: __HOME__/.cloudflared/TUNNEL_ID.json
+
+ingress:
+  # 公开域名指向在线版（4319），不要指向开发版 4318：开发版没有登录。
+  - hostname: folio.你的子域.eu.org
+    service: http://127.0.0.1:4319
+  # 其余一律 404，避免隧道变成开放代理。
+  - service: http_status:404
