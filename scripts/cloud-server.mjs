@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {lookup} from 'node:dns/promises';
 import {readFile,stat,mkdir} from 'node:fs/promises';
 import {resolve,join,extname,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -12,8 +13,13 @@ import {FeishuComments} from './feishu-comments.mjs';
 import {exportSyncBundle,importSyncBundle} from './migration.mjs';
 import {PodcastJobs,podcastRoute} from './podcast-jobs.mjs';
 import {captureImages} from './capture-images.mjs';
+import {fetchArticlePage} from './url-import.mjs';
 
-export async function createCloudServer({env=process.env,feishu,comments:commentService,request=fetch}={}){
+// 链接导入的 SSRF 防护：只允许公网地址，且仅解析 A 记录，避免 IPv6 旁路。
+const resolve4=(host,{all})=>lookup(host,{all,family:4});
+
+export async function createCloudServer({env=process.env,feishu,comments:commentService,request=fetch,articleResolve}={}){
+  const resolveArticle=articleResolve||resolve4;
   const origin=env.FOLIO_PUBLIC_URL,openAccess=env.FOLIO_OPEN_ACCESS==='1'||env.FOLIO_OPEN_ACCESS==='true',auth=new CloudAuth({origin,secret:env.FOLIO_SESSION_SECRET,password:env.FOLIO_PASSWORD_HASH,openAccess});
   if(!env.FOLIO_DATA_DIR)throw Error('必须指定持久化目录 FOLIO_DATA_DIR');
   const store=new CloudStore(resolve(env.FOLIO_DATA_DIR)),devices=new Devices(store),ai=new CloudAI({devices,env,request});
@@ -57,6 +63,7 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
       }
       if(path==='/api/logout'&&req.method==='POST'){res.setHeader('Set-Cookie',auth.cookie('',0));return json(200,{ok:true});}
       if(path.startsWith('/api/podcasts/'))return json(200,await podcastRoute(podcasts,path,req.method,req.method==='POST'?await body(20000):{},url.searchParams));
+      if(path==='/api/import/url'&&req.method==='POST'){const b=await body(3000);try{const {html,finalUrl}=await fetchArticlePage(b.url,{request,resolve:resolveArticle});return json(200,{html,finalUrl});}catch(e){return json(502,{error:e.message||'抓取失败'});}}
       if(path==='/api/capture/images'&&req.method==='POST')return json(200,await captureImages((await body(100000)).urls));
       if(path==='/api/status')return json(200,{cloud:true,local:false,configured:ai.configured(),model:env.FOLIO_AI_MODEL||''});
       if(path==='/api/cloud/status')return json(200,{devices:await devices.list(),settings:worker.settings,worker:{running:worker.running,lastRun:worker.lastRun,errors:worker.errors},apiConfigured:ai.configured(),apiModels:(env.FOLIO_AI_MODELS||env.FOLIO_AI_MODEL||'').split(',').filter(Boolean)});

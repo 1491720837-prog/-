@@ -2172,7 +2172,7 @@ function openContext() {
 function importFromUrl() {
   const dialog = modal(
     "链接导入",
-    `<p>粘贴公开文章链接：公众号、博客、新闻页都可以。抓取在本机服务完成，正文和图片顺序会先进入采集箱供你预览，再决定保存为独立项目还是当前项目。</p><label class="field-label" for="url-import-input">文章链接</label><input class="text-field" id="url-import-input" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off" spellcheck="false"><p id="url-import-status" role="status">需要登录、付费或整页由脚本生成的文章无法直接读取，请改用浏览器扩展。</p>`,
+    `<p>粘贴公开文章链接：公众号、博客、新闻页都可以。抓取由当前服务完成（本机版为本机服务，在线版为云端服务器），正文和图片顺序会先进入采集箱供你预览，再决定保存为独立项目还是当前项目。</p><label class="field-label" for="url-import-input">文章链接</label><input class="text-field" id="url-import-input" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off" spellcheck="false"><p id="url-import-status" role="status">需要登录、付费或整页由脚本生成的文章无法直接读取，请改用浏览器扩展。</p>`,
     '<button id="url-import-go" class="button primary">读取正文</button>',
   );
   const input = $("#url-import-input", dialog),
@@ -2194,7 +2194,12 @@ function importFromUrl() {
         body: JSON.stringify({ url: value }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "读取失败");
+      if (response.status === 404 && !data.error) throw new Error("当前服务不支持链接抓取，请改用本机版或浏览器扩展");
+      if (!response.ok) {
+        let message = data.error || "读取失败";
+        if (message === "Not found") message = "在线版尚未支持链接导入，请稍后重试或改用浏览器扩展";
+        throw new Error(message);
+      }
       const capture = extractDocument(
         new DOMParser().parseFromString(data.html, "text/html"),
         data.finalUrl || value,

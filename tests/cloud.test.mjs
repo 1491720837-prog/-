@@ -152,3 +152,22 @@ test('HTTP routes require login and origin, and only registered devices can clai
     r=await fetch(url+'/api/feishu/status',{headers:logged});assert.equal((await r.json()).serverManaged,true);
   }finally{await new Promise(r=>app.server.close(r));}
 }));
+
+test('cloud /api/import/url proxies article fetch and maps failures to clear errors',()=>temporary(async root=>{
+  const probe=net.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
+  const origin='http://127.0.0.1:'+port;
+  const fakeFetch=async(input)=>({ok:true,status:200,url:String(input),headers:{get:()=>'text/html; charset=utf-8'},text:async()=>'<!doctype html><html><body><h1>正文</h1></body></html>'});
+  const resolvePublic=async()=>[{address:'8.8.8.8'}];
+  const env={FOLIO_PUBLIC_URL:origin,FOLIO_DATA_DIR:root,FOLIO_SESSION_SECRET:'test-secret-'.repeat(4),FOLIO_PASSWORD_HASH:passwordHash('test-password')};
+  // request 注入避免真实网络；resolve 固定返回公网地址，SSRF 检查仍生效
+  const app=await createCloudServer({env,request:fakeFetch,articleResolve:resolvePublic});await new Promise(r=>app.server.listen(port,'127.0.0.1',r));
+  const url='http://127.0.0.1:'+app.server.address().port;
+  try{
+    const login=await fetch(url+'/api/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({password:'test-password'})});
+    const logged={Origin:origin,'Content-Type':'application/json',Cookie:login.headers.get('set-cookie').split(';')[0]};
+    let r=await fetch(url+'/api/import/url',{method:'POST',headers:logged,body:JSON.stringify({url:'https://mp.weixin.qq.com/s/x'})});
+    assert.equal(r.status,200);const d=await r.json();assert.ok(d.html.includes('正文'));
+    r=await fetch(url+'/api/import/url',{method:'POST',headers:logged,body:JSON.stringify({url:'http://127.0.0.1:9/admin'})});
+    assert.equal(r.status,502);assert.match((await r.json()).error,/内网|本机/);
+  }finally{await new Promise(r=>app.server.close(r));}
+}));
