@@ -43,6 +43,16 @@ test('open-access mode skips password and treats every request as authenticated'
   assert.equal(auth.authenticated({headers:{cookie:'folio_session=fake.signature'}}),true);
   assert.throws(()=>new CloudAuth({origin:'http://public.example',openAccess:true}));
 });
+
+test('loopback origin is accepted for local access even when public URL is a tunnel host',()=>{
+  const auth=new CloudAuth({origin:'https://folio.example',secret:'a'.repeat(40),password:passwordHash('pw')});
+  // 本机回环来源放行（固定 http://127.0.0.1:4319 本地访问）
+  assert.doesNotThrow(()=>auth.checkOrigin({headers:{origin:'http://127.0.0.1:4319'}}));
+  assert.doesNotThrow(()=>auth.checkOrigin({headers:{origin:'http://localhost:4319'}}));
+  // 公网来源必须严格匹配
+  assert.doesNotThrow(()=>auth.checkOrigin({headers:{origin:'https://folio.example'}}));
+  assert.throws(()=>auth.checkOrigin({headers:{origin:'https://evil.example'}}));
+});
 test('paired devices have scoped credentials, durable jobs, revocation and idempotent completion',()=>temporary(async root=>{
   let now=100;const store=new CloudStore(root),devices=new Devices(store,{now:()=>now}),pair=await devices.pair();
   const a=await devices.register(pair.code,'Mac A');await assert.rejects(devices.register(pair.code,'Mac B'));

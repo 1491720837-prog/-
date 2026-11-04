@@ -17,5 +17,10 @@ export class CloudAuth {
     const body=Buffer.from(JSON.stringify({exp:Date.now()+604800000,nonce:randomBytes(16).toString('hex')})).toString('base64url');return this.cookie(body+'.'+this.sign(body));
   }
   authenticated(req){if(this.openAccess)return true;try{const token=req.headers.cookie?.split(';').map(s=>s.trim()).find(s=>s.startsWith('folio_session='))?.slice(14);const [body,sig]=token.split('.');return equal(sig,this.sign(body))&&JSON.parse(Buffer.from(body,'base64url')).exp>Date.now();}catch{return false;}}
-  checkOrigin(req){if(req.headers.origin!==this.origin){const e=Error('请求来源不匹配');e.status=403;throw e;}}
+  checkOrigin(req){
+    if(req.headers.origin===this.origin)return;
+    // 本机回环来源(固定本地访问 http://127.0.0.1:4319)始终可信，放行以便本地保存与问 AI。
+    try{const h=new URL(req.headers.origin||'').hostname.toLowerCase();if(['127.0.0.1','localhost','::1','[::1]'].includes(h))return;}catch{}
+    const e=Error('请求来源不匹配');e.status=403;throw e;
+  }
 }

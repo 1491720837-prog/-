@@ -31,7 +31,9 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
     try{
       const url=new URL(req.url,origin),path=url.pathname;
       if(path==='/healthz'&&req.method==='GET')return json(200,{ok:true});
-      if(req.headers.host!==new URL(origin).host)return json(403,{error:'Host not allowed'});
+      // Host 检查防 DNS 重绑定；但本机回环(127.0.0.1/localhost/::1)始终安全，放行以便固定本地访问。
+      const reqHost=(req.headers.host||'').split(':')[0].toLowerCase(),isLoopback=['127.0.0.1','localhost','::1','[::1]'].includes(reqHost);
+      if(req.headers.host!==new URL(origin).host&&!isLoopback)return json(403,{error:'Host not allowed'});
       if(path.startsWith('/api/device/')){
         if(req.method!=='POST')return json(405,{error:'POST required'});
         if(req.headers.origin)return json(403,{error:'本机助手接口不接受浏览器调用'});
