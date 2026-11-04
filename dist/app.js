@@ -48,7 +48,8 @@ import { mergeFeishuChanges } from "./feishu-merge.js";
 import { createDemo, demoSections } from "./demo.js";
 import { download, zip, canvasImage } from "./export.js";
 import {openPodcastImport} from './podcast-import.js';
-import {safeWebURL,textParts} from './content-source.js';
+import {safeWebURL,textParts,transcriptParts} from './content-source.js';
+const TURN_HEADER=/^(Speaker\s+\d+|说话人\s*\d+)\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s*$/;
 import {installBrowserCapture} from './browser-capture.js';
 import {extractDocument} from './url-import.js';
 const $ = (q, r = document) => r.querySelector(q),
@@ -348,8 +349,13 @@ async function renderReader() {
   updateReaderPosition();
   updateZoomControls();
   for (const el of $$(".reader-scroll")) el.classList.toggle("fit-content", d.type === "pdf" && readerFitContent);
-  $("#english-paper").style.width = readerZoom * 100 + "%";
-  $("#chinese-paper").style.width = readerZoom * 100 + "%";
+  // PDF 按容器宽度重新渲染画布；文本/示例类文献只改宽度不会放大字号，改用 em 缩放（zoom 属性会破坏划词选区坐标）。
+  const textLike = d.type !== "pdf";
+  for (const paper of [$("#english-paper"), $("#chinese-paper")]) {
+    if (!paper) continue;
+    if (textLike) { paper.style.width = "100%"; paper.style.fontSize = readerZoom * 100 + "%"; }
+    else { paper.style.fontSize = ""; paper.style.width = readerZoom * 100 + "%"; }
+  }
   $("#translate-button").disabled = d.type === "demo" || !!d.translationPDF || d.contentKind==='podcast';
   $("#import-translation").innerHTML = icon("file") + (d.translationPDF ? "管理中文译本" : "导入中文译本");
   $("#translation-status").textContent =
@@ -367,7 +373,7 @@ async function renderReader() {
       const info=document.createElement('p');info.className='content-provenance';info.textContent=d.contentKind==='podcast'?'飞书妙记逐字稿 · 保留转写原文和时间标记':'浏览器采集 · 正文快照';
       for(const [label,url] of [['原始链接',d.provenance?.sourceUrl],['飞书妙记',d.provenance?.minuteUrl]])if(safeWebURL(url)){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.textContent=' · '+label;info.append(a);}en.append(info);
     }
-    const readingParts=d.contentKind==='article'&&d.contentBlocks?.length?d.contentBlocks:textParts(d).map(text=>({type:'text',text}));
+    const readingParts=d.contentKind==='podcast'?transcriptParts(d.text):d.contentKind==='article'&&d.contentBlocks?.length?d.contentBlocks:textParts(d).map(text=>({type:'text',text}));
     for (const [i, part] of readingParts.entries()) {
       if(part.type==='image'){
         const figure=document.createElement('figure');figure.dataset.section='t'+i;
@@ -375,7 +381,25 @@ async function renderReader() {
         else{const a=document.createElement('a');a.textContent='图片未保存 · 打开原图';a.href=safeWebURL(part.url);a.target='_blank';a.rel='noopener';figure.append(a);}en.append(figure);continue;
       }
       const el = document.createElement("p");
-      el.textContent = part.text;
+      if (part.type === "heading") {
+        const h = document.createElement(part.level === 1 ? "h2" : "h3");
+        h.textContent = part.text;
+        h.className = "transcript-heading";
+        en.append(h);
+        continue;
+      }
+      if (part.type === "turn") {
+        const label = document.createElement("b");
+        label.textContent = part.speaker + " ";
+        const time = document.createElement("span");
+        time.className = "turn-time";
+        time.textContent = part.time || "";
+        el.append(label, time, document.createTextNode("\n" + part.text));
+      } else if (TURN_HEADER.test(part.text)) {
+        const m = TURN_HEADER.exec(part.text);
+        el.dataset.turn = m[1] + " " + m[2];
+        el.textContent = part.text.slice(m[0].length).replace(/^\s*\n/, "");
+      } else el.textContent = part.text;
       el.style.whiteSpace = 'pre-wrap';
       el.dataset.section = "t" + i;
       en.append(el);

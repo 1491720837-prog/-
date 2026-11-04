@@ -10,6 +10,19 @@ export function articleDocument(capture,id){
   return {id,name:String(capture.title||'采集文章').slice(0,500),type:'text',pages:1,text:capture.text,contentBlocks:blocks,translations:{},contentKind:'article',provenance:{sourceUrl:safeWebURL(capture.url),author:String(capture.author||'').slice(0,200),importedAt:new Date().toISOString(),capture:'browser'}};
 }
 export function textParts(doc){return doc.text.split(/\n\s*\n/);}
+// 层级化逐字稿：# / ## 行渲染为标题，"Speaker N HH:MM:SS.mmm" 行拆成说话人+时间戳。
+const TURN_LINE=/^(Speaker\s+\d+|说话人\s*\d+)\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s*$/;
+export function turnHeader(chunk){return String(chunk||'').replace(/\r/g,'').match(TURN_LINE);}
+export function transcriptParts(text){
+  const parts=[];
+  for(const chunk of String(text||'').split(/\n\s*\n/)){
+    if(/^#{1,2}\s[^\n]*$/.test(chunk.trim())){const t=chunk.trim();parts.push({type:'heading',level:t.startsWith('## ')?2:1,text:t.replace(/^#+\s*/,'')});continue;}
+    const m=turnHeader(chunk);
+    if(m){parts.push({type:'turn',speaker:m[1],time:m[2],text:chunk.slice(m[0].length).trim()});continue;}
+    parts.push({type:'text',text:chunk});
+  }
+  return parts;
+}
 export function textCorpus(doc){let text=doc.text;const parts=[];while(text.length){let end=Math.min(text.length,80000);if(end<text.length){const split=text.lastIndexOf('\n',end);if(split>end/2)end=split;}parts.push(text.slice(0,end));text=text.slice(end);}return (parts.length?parts:['']).map((text,i)=>({docId:doc.id,name:doc.name+(doc.contentKind==='podcast'?' · 飞书逐字稿（按原有时间戳引用）':''),page:i+1,side:'en',text,kind:doc.contentKind||'text'}));}
 export function contentSourceLabel(doc,source={}){
   if(doc?.contentKind==='podcast')return `${doc.name} · 播客逐字稿${source.section?' · 第 '+(Number(source.section.slice(1))+1)+' 段':''}`;

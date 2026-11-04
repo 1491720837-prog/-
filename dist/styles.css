@@ -375,7 +375,7 @@ body.workspace-fullscreen .drawer { top: 0; }
   margin-bottom: 24px;
 }
 .demo-paper h1 {
-  font-size: 30px;
+  font-size: 2.727em;
   font-weight: 500;
   line-height: 1.2;
   letter-spacing: -0.8px;
@@ -384,7 +384,7 @@ body.workspace-fullscreen .drawer { top: 0; }
   color: #334a3c;
 }
 .demo-paper .subtitle {
-  font-size: 11px;
+  font-size: 1em;
   line-height: 1.6;
   color: #727867;
   margin: 0 0 19px;
@@ -399,12 +399,40 @@ body.workspace-fullscreen .drawer { top: 0; }
   margin-bottom: 24px;
 }
 .demo-paper h2 {
-  font-size: 15px;
+  font-size: 1.364em;
   margin: 25px 0 11px;
   font-weight: 600;
 }
+/* 层级化逐字稿：话题/小节标题与时间戳样式 */
+.demo-paper h2.transcript-heading {
+  font-size: 1.6em;
+  margin: 30px 0 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #dfe3d7;
+  color: #334a3c;
+}
+.demo-paper h3.transcript-heading {
+  font-size: 1.25em;
+  margin: 24px 0 10px;
+  color: #3f5648;
+}
+/* 播客逐字稿说话人段落：首行加粗由 <b> 承担，时间戳弱化显示 */
+.demo-paper p[data-turn] {
+  padding-left: 10px;
+  border-left: 2px solid #e4e8dc;
+}
+.demo-paper p[data-turn] b {
+  color: #3f5648;
+}
+.turn-time {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.72em;
+  color: #9aa08c;
+  font-weight: 400;
+  margin-left: 6px;
+}
 .demo-paper p {
-  font-size: 11px;
+  font-size: 1em;
   line-height: 1.9;
   margin: 0 0 14px;
   text-align: left;
@@ -421,13 +449,13 @@ body.workspace-fullscreen .drawer { top: 0; }
   padding: 12px 13px;
   border-left: 2px solid #9eaf89;
   background: #f3f4e9;
-  font-size: 13px;
+  font-size: 1.182em;
   line-height: 1.7;
   color: #5d7050;
   font-style: italic;
 }
 .demo-paper .caption {
-  font-size: 8px;
+  font-size: 0.727em;
   line-height: 1.6;
   color: #929482;
   text-align: center;
@@ -445,16 +473,16 @@ body.workspace-fullscreen .drawer { top: 0; }
   font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
 }
 .demo-paper.zh h1 {
-  font-size: 28px;
+  font-size: 2.545em;
   letter-spacing: 1px;
   line-height: 1.27;
 }
 .demo-paper.zh p {
-  font-size: 11px;
+  font-size: 1em;
   line-height: 2;
 }
 .demo-paper.zh h2 {
-  font-size: 14px;
+  font-size: 1.273em;
 }
 .demo-figure {
   width: 100%;
