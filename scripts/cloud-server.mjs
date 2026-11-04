@@ -122,6 +122,9 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   try{process.loadEnvFile('.env.cloud');}catch{}
+  // 临时隧道网址会变化：隧道同步脚本把最新网址写到 ~/.local/folio/current-url，
+  // 这里优先采用它作为 FOLIO_PUBLIC_URL，避免每次开机都要手改 .env.cloud。
+  try{const u=(await readFile(process.env.HOME+'/.local/folio/current-url','utf8')).trim();if(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(u))process.env.FOLIO_PUBLIC_URL=u;}catch{}
   const app=await createCloudServer();app.worker.start();
   app.server.listen(Number(process.env.PORT||4319),process.env.HOST||'0.0.0.0',()=>console.log('Folio 在线服务已启动；项目保存在持久化目录。'));
   for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{app.worker.stop();app.server.close(()=>process.exit(0));setTimeout(()=>process.exit(1),30000).unref();});
