@@ -36,6 +36,13 @@ test('cloud auth refuses public HTTP, weak secrets, forged cookies and cross-ori
   assert.ok(auth.authenticated({headers:{cookie:cookie.split(';')[0]}}));assert.equal(auth.authenticated({headers:{cookie:'folio_session=fake.signature'}}),false);
   assert.throws(()=>auth.checkOrigin({headers:{origin:'https://evil.example'}}));
 });
+
+test('open-access mode skips password and treats every request as authenticated',()=>{
+  const auth=new CloudAuth({origin:'https://folio.example',openAccess:true});
+  assert.equal(auth.authenticated({headers:{}}),true);
+  assert.equal(auth.authenticated({headers:{cookie:'folio_session=fake.signature'}}),true);
+  assert.throws(()=>new CloudAuth({origin:'http://public.example',openAccess:true}));
+});
 test('paired devices have scoped credentials, durable jobs, revocation and idempotent completion',()=>temporary(async root=>{
   let now=100;const store=new CloudStore(root),devices=new Devices(store,{now:()=>now}),pair=await devices.pair();
   const a=await devices.register(pair.code,'Mac A');await assert.rejects(devices.register(pair.code,'Mac B'));

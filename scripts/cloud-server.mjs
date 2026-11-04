@@ -14,7 +14,7 @@ import {PodcastJobs,podcastRoute} from './podcast-jobs.mjs';
 import {captureImages} from './capture-images.mjs';
 
 export async function createCloudServer({env=process.env,feishu,comments:commentService,request=fetch}={}){
-  const origin=env.FOLIO_PUBLIC_URL,auth=new CloudAuth({origin,secret:env.FOLIO_SESSION_SECRET,password:env.FOLIO_PASSWORD_HASH});
+  const origin=env.FOLIO_PUBLIC_URL,openAccess=env.FOLIO_OPEN_ACCESS==='1'||env.FOLIO_OPEN_ACCESS==='true',auth=new CloudAuth({origin,secret:env.FOLIO_SESSION_SECRET,password:env.FOLIO_PASSWORD_HASH,openAccess});
   if(!env.FOLIO_DATA_DIR)throw Error('必须指定持久化目录 FOLIO_DATA_DIR');
   const store=new CloudStore(resolve(env.FOLIO_DATA_DIR)),devices=new Devices(store),ai=new CloudAI({devices,env,request});
   const sync=feishu||new FeishuSync({root:join(store.root,'feishu-sync')}),comments=commentService||new FeishuComments(sync);
