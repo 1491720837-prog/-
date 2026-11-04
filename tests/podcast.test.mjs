@@ -77,3 +77,16 @@ test('transcriptParts keeps every chunk aligned and parses headings and turn hea
   // 与原始按空行切分的块数一致(标题也占一个索引)，保证 t<i> 定位不漂移
   assert.equal(parts.length,text.split(/\n\s*\n/).length);
 });
+
+test('articleDocument preserves downloaded image data and per-image errors',async()=>{
+  const {articleDocument}=await import('../dist/content-source.js');
+  const capture={title:'文章',url:'https://example.com/a',text:'正文内容'.repeat(10),author:'',blocks:[
+    {type:'image',url:'https://mmbiz.qpic.cn/ok.jpg',data:'data:image/jpeg;base64,QUJD'},
+    {type:'image',url:'https://mmbiz.qpic.cn/bad.jpg',error:'图片超过 2 MB'},
+    {type:'text',text:'段落'},
+  ]};
+  const doc=articleDocument(capture,'article-x');
+  assert.equal(doc.contentBlocks.length,3);
+  assert.equal(doc.contentBlocks[0].data,'data:image/jpeg;base64,QUJD');
+  assert.equal(doc.contentBlocks[1].error,'图片超过 2 MB');
+});

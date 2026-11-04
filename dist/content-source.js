@@ -6,7 +6,7 @@ export function podcastDocument({id,title,text,sourceUrl,minuteUrl,jobId,duratio
 }
 export function articleDocument(capture,id){
   if(!capture||typeof capture.text!=='string'||capture.text.trim().length<10||capture.text.length>1_000_000||!safeWebURL(capture.url))throw Error('采集内容不完整，未导入');
-  const blocks=Array.isArray(capture.blocks)?capture.blocks.slice(0,2000).flatMap(b=>b?.type==='text'&&typeof b.text==='string'?[{type:'text',text:b.text.slice(0,1_000_000)}]:b?.type==='image'&&safeWebURL(b.url)?[{type:'image',url:safeWebURL(b.url),alt:String(b.alt||'').slice(0,500)}]:[]):[];
+  const blocks=Array.isArray(capture.blocks)?capture.blocks.slice(0,2000).flatMap(b=>b?.type==='text'&&typeof b.text==='string'?[{type:'text',text:b.text.slice(0,1_000_000)}]:b?.type==='image'&&safeWebURL(b.url)?[{type:'image',url:safeWebURL(b.url),alt:String(b.alt||'').slice(0,500),...(typeof b.data==='string'&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]{1,8000000}$/.test(b.data)?{data:b.data}:[]),...(typeof b.error==='string'?{error:b.error.slice(0,300)}:[])}]:[]):[];
   return {id,name:String(capture.title||'采集文章').slice(0,500),type:'text',pages:1,text:capture.text,contentBlocks:blocks,translations:{},contentKind:'article',provenance:{sourceUrl:safeWebURL(capture.url),author:String(capture.author||'').slice(0,200),importedAt:new Date().toISOString(),capture:'browser'}};
 }
 export function textParts(doc){return doc.text.split(/\n\s*\n/);}
