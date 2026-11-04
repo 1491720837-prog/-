@@ -20,7 +20,7 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
   const sync=feishu||new FeishuSync({root:join(store.root,'feishu-sync')}),comments=commentService||new FeishuComments(sync);
   const podcasts=new PodcastJobs({root:join(store.root,'podcast-jobs')});
   const worker=new CloudWorker({store,devices,ai,sync,comments});await Promise.all([store.ready,devices.ready,worker.ready,sync.ready,comments.ready]);
-  const root=fileURLToPath(new URL('../dist/',import.meta.url)).replace(/[\\/]$/,''),types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.wasm':'application/wasm','.json':'application/json','.png':'image/png','.pdf':'application/pdf'};
+  const root=fileURLToPath(new URL('../dist/',import.meta.url)).replace(/[\\/]$/,''),types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.wasm':'application/wasm','.json':'application/json','.webmanifest':'application/manifest+json','.png':'image/png','.pdf':'application/pdf'};
   const server=http.createServer(async(req,res)=>{
     const json=(status,value)=>{if(res.headersSent)return res.end();res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));};
     const body=async(limit=1_000_000)=>{
