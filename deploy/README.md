@@ -9,8 +9,20 @@
 ## 0. 已经准备好的部分
 
 - `~/.local/bin/cloudflared`（2026.10.7，Cloudflare Inc. 签名）
-- 在线版已验证可用：`npm run cloud` → 4319，单账号密码登录
-- 本目录的 launchd 模板 + `install.sh`，域名到手后一条命令装成开机自启
+- 在线版已装成登录项 `com.folio.cloud`（开机自启 + 崩溃自动拉起），地址 <http://127.0.0.1:4319>
+- 每日备份已装成 `com.folio.backup`（03:30 → `~/FolioBackups`，保留 7 份）
+- 本目录的 launchd 模板 + `install.sh`，域名到手后一条命令接上隧道
+
+密码与备份的日常操作：
+
+```bash
+npm run cloud:password          # 生成新密码（只显示一次）并重启生效
+npm run cloud:password 你的密码  # 或指定一个至少 8 位的密码
+npm run cloud:backup            # 立刻备份一份
+ls -lt ~/FolioBackups | head    # 看历史备份
+```
+
+忘记密码时不用重建数据：`npm run cloud:password` 只改 `.env.cloud` 里的哈希。
 
 ---
 
@@ -114,3 +126,32 @@ curl -sI https://folio.你的子域.eu.org/ | head -3      # 303 → /login.html
 - 不能多实例：存储是文件版本，只有单个进程能写
 - 大陆访问 Cloudflare 的稳定性不由你控制，慢的时候换 Wi-Fi/蜂窝对比
 - 想要真正常驻，换一台云服务器（见 `DEPLOYMENT.md`）
+
+---
+
+## 9. 恢复与状态检查
+
+```bash
+# 在线版在跑吗
+launchctl print "gui/$(id -u)/com.folio.cloud" | grep -E "state =|pid =" 
+curl -s http://127.0.0.1:4319/healthz          # {"ok":true}
+
+# 从备份恢复（先停服务，恢复后重启）
+launchctl bootout "gui/$(id -u)/com.folio.cloud"
+tar -xzf ~/FolioBackups/cloud-data-YYYYmmdd-HHMMSS.tgz -C artifacts/
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.folio.cloud.plist
+```
+
+`artifacts/cloud-data` 是在线版数据的唯一副本：项目版本、PDF、图片、飞书映射都在里面。它已被 `.gitignore` 排除，不会进仓库，所以备份只在本机 `~/FolioBackups`——建议定期把这个目录同步到移动硬盘或私有云盘。
+
+## 10. 域名审核等待期间能做什么
+
+- 用 <http://127.0.0.1:4319> 先把在线版跑起来：导入项目备份、确认登录与项目切换
+- 需要临时公网访问时再起一次快速隧道（地址会变，仅自用）：
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:4319
+# 拿到 https://xxx.trycloudflare.com 后，把它写进 .env.cloud 的 FOLIO_PUBLIC_URL 并重启服务
+```
+
+严格说这一步需要改 `FOLIO_PUBLIC_URL`，否则服务端会以 `Host not allowed` 拒绝——这正是防 DNS 重绑定的那道检查。

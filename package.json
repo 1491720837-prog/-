@@ -11,6 +11,8 @@
     "test:cloud-ui": "node scripts/cloud-e2e.mjs",
     "cloud": "node scripts/cloud-server.mjs",
     "cloud:setup": "node scripts/cloud-setup.mjs",
+    "cloud:password": "node scripts/cloud-password.mjs",
+    "cloud:backup": "zsh deploy/backup.sh",
     "companion": "node scripts/companion.mjs",
     "companion:pair": "node scripts/companion.mjs --pair",
     "test:chat-ui": "node scripts/chat-e2e.mjs",
