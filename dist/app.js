@@ -339,6 +339,7 @@ async function renderReader() {
   stopCrop();
   $("#document-name").textContent = d.name;
   const heading=$('.english-panel .panel-title');heading.innerHTML='<span class="panel-number">01</span> '+(d.contentKind==='podcast'?'播客逐字稿':d.contentKind==='article'?'文章阅读':'原文阅读')+' <span class="language-badge">'+(d.contentKind==='podcast'?'音频':d.contentKind==='article'?'网页':'EN')+'</span>';
+  $('.english-panel .transcript-toc')?.remove();if(tocScrollCleanup){tocScrollCleanup();tocScrollCleanup=null;}
   $('#english-scroll').setAttribute('aria-label',d.contentKind==='podcast'?'播客逐字稿连续阅读区':d.contentKind==='article'?'文章连续阅读区':'英文文献连续阅读区');
   const pairedView=!d.contentKind&&translationVisible;
   $(".content-workspace").classList.toggle('single-source',!pairedView);
@@ -408,6 +409,7 @@ async function renderReader() {
     $("#english-paper").replaceChildren(en);
     if(d.contentKind==='podcast'){
       const panel=document.createElement('article');panel.className='demo-paper';const heading=document.createElement('h2');heading.textContent='播客逐字稿';const p=document.createElement('p');p.textContent='左侧可连续阅读、高亮并生成摘录节点。转写为飞书自动识别结果，专有名词和说话人请结合音频核对。';panel.append(heading,p);const b=document.createElement('button');b.className='button';b.textContent='下载完整文字稿';b.onclick=()=>download(d.name+'.txt',d.text,'text/plain;charset=utf-8');panel.append(b);$('#chinese-paper').replaceChildren(panel);$('#translation-status').textContent='播客逐字稿 · 非译文';
+      mountTranscriptExtras(en,d);
     }else renderTextTranslation(d);
   } else {
     $("#english-paper").textContent = "正在准备连续阅读…";
@@ -476,6 +478,48 @@ async function renderReader() {
   if (epoch !== renderEpoch) return;
   renderHighlights();
   attachReaderEvents();
+}
+let tocScrollCleanup=null,tocScrollHandler=null;
+function mountTranscriptExtras(en,d){
+  if(tocScrollCleanup){tocScrollCleanup();tocScrollCleanup=null;}
+  $(".english-panel .transcript-toc")?.remove();
+  const panelTitle=$(".english-panel .panel-title");
+  const heads=[...en.querySelectorAll("h2.transcript-heading,h3.transcript-heading")];
+  heads.forEach((h,i)=>{h.id="transcript-toc-"+i;});
+  if(heads.length>=2){
+    const btn=document.createElement("button");
+    btn.className="small-button panel-extra-button";btn.textContent="目录";btn.setAttribute("aria-expanded","false");
+    panelTitle.append(btn);
+    const toc=document.createElement("nav");
+    toc.className="transcript-toc hidden";toc.setAttribute("aria-label","逐字稿目录");
+    toc.innerHTML=heads.map((h,i)=>`<button class="toc-item ${h.tagName==="H2"?"toc-l1":"toc-l2"}" data-toc-target="${h.id}">${esc(h.textContent)}</button>`).join("");
+    $(".english-panel").append(toc);
+    btn.onclick=()=>{
+      const show=toc.classList.toggle("hidden")===false;
+      btn.setAttribute("aria-expanded",String(show));
+      if(show&&tocScrollHandler)tocScrollHandler();
+    };
+    toc.onclick=e=>{
+      const item=e.target.closest("[data-toc-target]");if(!item)return;
+      document.getElementById(item.dataset.tocTarget)?.scrollIntoView({behavior:"smooth",block:"start"});
+    };
+    const scroll=$("#english-scroll");
+    tocScrollHandler=()=>{
+      const top=scroll.getBoundingClientRect().top+90;
+      let active=-1;
+      for(let i=0;i<heads.length;i++)if(heads[i].getBoundingClientRect().top<=top)active=i;
+      toc.querySelectorAll(".toc-item").forEach((it,i)=>it.classList.toggle("active",i===active));
+    };
+    scroll.addEventListener("scroll",tocScrollHandler,{passive:true});
+    tocScrollCleanup=()=>scroll.removeEventListener("scroll",tocScrollHandler);
+  }
+  const docUrl=d.provenance?safeWebURL(d.provenance.hierarchicalDocUrl):"";
+  if(docUrl&&/feishu\.cn|larkoffice\.com/.test(new URL(docUrl).hostname)){
+    const fb=document.createElement("button");
+    fb.className="small-button panel-extra-button";fb.textContent="飞书视图";
+    panelTitle.append(fb);
+    fb.onclick=()=>modal("飞书文档视图",`<iframe class="feishu-frame" src="${esc(docUrl)}" title="逐字稿飞书文档" loading="lazy"></iframe><p>目录、编辑、评论均为飞书原生界面；浏览器需保持飞书登录。在飞书里的修改会经飞书同步回流到工作台。</p>`,`<a class="button" href="${esc(docUrl)}" target="_blank" rel="noopener">新标签页打开</a>`);
+  }
 }
 function untranslatedPage(page) {
   const sheet = document.createElement("div");
