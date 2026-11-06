@@ -64,3 +64,29 @@ test('podcast provenance and article snapshots survive save/export; long transcr
   assert.throws(()=>articleDocument({text:'你好内容'.repeat(10),url:'javascript:alert(1)'},'article'));
   const article=articleDocument({title:'文章',text:'正文'.repeat(20),url:'https://example.com/a',blocks:[{type:'text',text:'正文'},{type:'image',url:'javascript:alert(1)'}]},'article');assert.equal(article.contentBlocks.length,1);
 });
+
+test('transcriptParts keeps every chunk aligned and parses headings and turn headers',async()=>{
+  const {transcriptParts}=await import('../dist/content-source.js');
+  const text='2026-10-28|2h\n\nSpeaker 1 00:00:17.290 \n哈喽，欢迎。\n\n# 话题一：开场\n\n## 小节A（00:00-04:40）\n\nSpeaker 2 00:00:54.980\n你好世界。';
+  const parts=transcriptParts(text);
+  assert.equal(parts[0].type,'text');assert.match(parts[0].text,/2026-10-28/);
+  assert.equal(parts[1].type,'text');assert.match(parts[1].text,/哈喽，欢迎/);
+  assert.equal(parts[2].type,'heading');assert.equal(parts[2].level,1);assert.equal(parts[2].text,'话题一：开场');
+  assert.equal(parts[3].type,'heading');assert.equal(parts[3].level,2);assert.match(parts[3].text,/小节A/);
+  assert.equal(parts[4].type,'text');assert.match(parts[4].text,/你好世界/);
+  // 与原始按空行切分的块数一致(标题也占一个索引)，保证 t<i> 定位不漂移
+  assert.equal(parts.length,text.split(/\n\s*\n/).length);
+});
+
+test('articleDocument preserves downloaded image data and per-image errors',async()=>{
+  const {articleDocument}=await import('../dist/content-source.js');
+  const capture={title:'文章',url:'https://example.com/a',text:'正文内容'.repeat(10),author:'',blocks:[
+    {type:'image',url:'https://mmbiz.qpic.cn/ok.jpg',data:'data:image/jpeg;base64,QUJD'},
+    {type:'image',url:'https://mmbiz.qpic.cn/bad.jpg',error:'图片超过 2 MB'},
+    {type:'text',text:'段落'},
+  ]};
+  const doc=articleDocument(capture,'article-x');
+  assert.equal(doc.contentBlocks.length,3);
+  assert.equal(doc.contentBlocks[0].data,'data:image/jpeg;base64,QUJD');
+  assert.equal(doc.contentBlocks[1].error,'图片超过 2 MB');
+});

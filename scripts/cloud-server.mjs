@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {lookup} from 'node:dns/promises';
 import {readFile,stat,mkdir} from 'node:fs/promises';
 import {resolve,join,extname,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -12,15 +13,20 @@ import {FeishuComments} from './feishu-comments.mjs';
 import {exportSyncBundle,importSyncBundle} from './migration.mjs';
 import {PodcastJobs,podcastRoute} from './podcast-jobs.mjs';
 import {captureImages} from './capture-images.mjs';
+import {fetchArticlePage} from './url-import.mjs';
 
-export async function createCloudServer({env=process.env,feishu,comments:commentService,request=fetch}={}){
-  const origin=env.FOLIO_PUBLIC_URL,auth=new CloudAuth({origin,secret:env.FOLIO_SESSION_SECRET,password:env.FOLIO_PASSWORD_HASH});
+// 链接导入的 SSRF 防护：只允许公网地址，且仅解析 A 记录，避免 IPv6 旁路。
+const resolve4=(host,{all})=>lookup(host,{all,family:4});
+
+export async function createCloudServer({env=process.env,feishu,comments:commentService,request=fetch,articleResolve}={}){
+  const resolveArticle=articleResolve||resolve4;
+  const origin=env.FOLIO_PUBLIC_URL,openAccess=env.FOLIO_OPEN_ACCESS==='1'||env.FOLIO_OPEN_ACCESS==='true',auth=new CloudAuth({origin,secret:env.FOLIO_SESSION_SECRET,password:env.FOLIO_PASSWORD_HASH,openAccess});
   if(!env.FOLIO_DATA_DIR)throw Error('必须指定持久化目录 FOLIO_DATA_DIR');
   const store=new CloudStore(resolve(env.FOLIO_DATA_DIR)),devices=new Devices(store),ai=new CloudAI({devices,env,request});
   const sync=feishu||new FeishuSync({root:join(store.root,'feishu-sync')}),comments=commentService||new FeishuComments(sync);
   const podcasts=new PodcastJobs({root:join(store.root,'podcast-jobs')});
   const worker=new CloudWorker({store,devices,ai,sync,comments});await Promise.all([store.ready,devices.ready,worker.ready,sync.ready,comments.ready]);
-  const root=fileURLToPath(new URL('../dist/',import.meta.url)).replace(/[\\/]$/,''),types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.wasm':'application/wasm','.json':'application/json','.png':'image/png','.pdf':'application/pdf'};
+  const root=fileURLToPath(new URL('../dist/',import.meta.url)).replace(/[\\/]$/,''),types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.wasm':'application/wasm','.json':'application/json','.webmanifest':'application/manifest+json','.png':'image/png','.pdf':'application/pdf'};
   const server=http.createServer(async(req,res)=>{
     const json=(status,value)=>{if(res.headersSent)return res.end();res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));};
     const body=async(limit=1_000_000)=>{
@@ -31,7 +37,9 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
     try{
       const url=new URL(req.url,origin),path=url.pathname;
       if(path==='/healthz'&&req.method==='GET')return json(200,{ok:true});
-      if(req.headers.host!==new URL(origin).host)return json(403,{error:'Host not allowed'});
+      // Host 检查防 DNS 重绑定；但本机回环(127.0.0.1/localhost/::1)始终安全，放行以便固定本地访问。
+      const reqHost=(req.headers.host||'').split(':')[0].toLowerCase(),isLoopback=['127.0.0.1','localhost','::1','[::1]'].includes(reqHost);
+      if(req.headers.host!==new URL(origin).host&&!isLoopback)return json(403,{error:'Host not allowed'});
       if(path.startsWith('/api/device/')){
         if(req.method!=='POST')return json(405,{error:'POST required'});
         if(req.headers.origin)return json(403,{error:'本机助手接口不接受浏览器调用'});
@@ -55,6 +63,7 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
       }
       if(path==='/api/logout'&&req.method==='POST'){res.setHeader('Set-Cookie',auth.cookie('',0));return json(200,{ok:true});}
       if(path.startsWith('/api/podcasts/'))return json(200,await podcastRoute(podcasts,path,req.method,req.method==='POST'?await body(20000):{},url.searchParams));
+      if(path==='/api/import/url'&&req.method==='POST'){const b=await body(3000);try{const {html,finalUrl}=await fetchArticlePage(b.url,{request,resolve:resolveArticle});return json(200,{html,finalUrl});}catch(e){return json(502,{error:e.message||'抓取失败'});}}
       if(path==='/api/capture/images'&&req.method==='POST')return json(200,await captureImages((await body(100000)).urls));
       if(path==='/api/status')return json(200,{cloud:true,local:false,configured:ai.configured(),model:env.FOLIO_AI_MODEL||''});
       if(path==='/api/cloud/status')return json(200,{devices:await devices.list(),settings:worker.settings,worker:{running:worker.running,lastRun:worker.lastRun,errors:worker.errors},apiConfigured:ai.configured(),apiModels:(env.FOLIO_AI_MODELS||env.FOLIO_AI_MODEL||'').split(',').filter(Boolean)});
@@ -122,6 +131,9 @@ export async function createCloudServer({env=process.env,feishu,comments:comment
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   try{process.loadEnvFile('.env.cloud');}catch{}
+  // 临时隧道网址会变化：隧道同步脚本把最新网址写到 ~/.local/folio/current-url，
+  // 这里优先采用它作为 FOLIO_PUBLIC_URL，避免每次开机都要手改 .env.cloud。
+  try{const u=(await readFile(process.env.HOME+'/.local/folio/current-url','utf8')).trim();if(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(u))process.env.FOLIO_PUBLIC_URL=u;}catch{}
   const app=await createCloudServer();app.worker.start();
   app.server.listen(Number(process.env.PORT||4319),process.env.HOST||'0.0.0.0',()=>console.log('Folio 在线服务已启动；项目保存在持久化目录。'));
   for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{app.worker.stop();app.server.close(()=>process.exit(0));setTimeout(()=>process.exit(1),30000).unref();});

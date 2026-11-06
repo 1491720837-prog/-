@@ -1,10 +1,12 @@
 import {CloudAI} from './cloud-ai.mjs';
 import {exportSyncBundle} from './migration.mjs';
+import {normalizeModels} from './model-catalog.mjs';
 import http from "node:http";
 import { CodexBridge } from "./codex-bridge.mjs";
 import { TranslationJobs } from "./translation-jobs.mjs";
 import {PodcastJobs,podcastRoute} from './podcast-jobs.mjs';
 import {captureImages} from './capture-images.mjs';
+import {fetchArticlePage} from './url-import.mjs';
 const podcasts=new PodcastJobs();
 const codex = new CodexBridge();
 const translations = new TranslationJobs({codex});
@@ -20,6 +22,7 @@ try {
 } catch {}
 const root = resolve("dist");
 const port = Number(process.env.PORT || 4318);
+let modelCache = { at: 0, models: null };
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -28,6 +31,7 @@ const types = {
   ".svg": "image/svg+xml",
   ".wasm": "application/wasm",
   ".json": "application/json",
+  ".webmanifest": "application/manifest+json",
   ".png": "image/png",
   ".pdf": "application/pdf",
 };
@@ -49,6 +53,15 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/capture/images'){
       if(req.headers.origin&&![`http://localhost:${port}`,`http://127.0.0.1:${port}`].includes(req.headers.origin))return json(403,{error:'Origin not allowed'});
       if(req.method!=='POST'||!req.headers['content-type']?.startsWith('application/json'))return json(415,{error:'JSON POST required'});let input='';for await(const chunk of req){input+=chunk;if(input.length>100000)return json(413,{error:'请求过大'});}return json(200,await captureImages(JSON.parse(input).urls));
+    }
+    if(url.pathname==='/api/import/url'&&req.method==='POST'){
+      if(req.headers.origin&&![`http://localhost:${port}`,`http://127.0.0.1:${port}`].includes(req.headers.origin))return json(403,{error:'Origin not allowed'});
+      if(!req.headers['content-type']?.startsWith('application/json'))return json(415,{error:'JSON POST required'});
+      let input='';for await(const chunk of req){input+=chunk;if(input.length>20000)return json(413,{error:'请求过大'});}
+      let payload;try{payload=JSON.parse(input||'{}')}catch{return json(400,{error:'请求格式无效'});}
+      if(!payload.url)return json(400,{error:'缺少文章链接'});
+      try{const {html,finalUrl}=await fetchArticlePage(payload.url);return json(200,{html,finalUrl});}
+      catch(e){return json(400,{error:e.message});}
     }
     if(url.pathname.startsWith('/api/podcasts/')){
       if(req.headers.origin&&![`http://localhost:${port}`,`http://127.0.0.1:${port}`].includes(req.headers.origin))return json(403,{error:'Origin not allowed'});
@@ -117,10 +130,48 @@ const server = http.createServer(async (req, res) => {
       finally{clearInterval(heartbeat);res.end();}
       return;
     }
+    if (url.pathname === "/api/models" && req.method === "GET") {
+      if (
+        req.headers.origin &&
+        !["http://localhost:" + port, "http://127.0.0.1:" + port].includes(
+          req.headers.origin,
+        )
+      )
+        return json(403, { error: "Origin not allowed" });
+      if (!process.env.FOLIO_AI_BASE_URL)
+        return json(200, { models: [], configured: false });
+      if (modelCache.models && Date.now() - modelCache.at < 300_000)
+        return json(200, { models: modelCache.models, configured: true });
+      try {
+        const response = await fetch(
+          process.env.FOLIO_AI_BASE_URL.replace(/\/$/, "") + "/models",
+          {
+            headers: process.env.FOLIO_AI_API_KEY
+              ? { Authorization: "Bearer " + process.env.FOLIO_AI_API_KEY }
+              : {},
+            signal: AbortSignal.timeout(15000),
+          },
+        );
+        if (!response.ok)
+          return json(200, {
+            models: [],
+            configured: true,
+            error: "模型列表不可用：" + response.status,
+          });
+        modelCache = { at: Date.now(), models: normalizeModels(await response.json()) };
+        return json(200, { models: modelCache.models, configured: true });
+      } catch (e) {
+        return json(200, { models: [], configured: true, error: e.message });
+      }
+    }
     if (url.pathname === "/api/status")
       return json(200, {
         configured: !!process.env.FOLIO_AI_BASE_URL,
         model: process.env.FOLIO_AI_MODEL || "",
+        models: (process.env.FOLIO_AI_MODELS || process.env.FOLIO_AI_MODEL || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
         local: true,
       });
     if (url.pathname === "/api/chat") {
@@ -160,6 +211,18 @@ const server = http.createServer(async (req, res) => {
           model: payload.model || process.env.FOLIO_AI_MODEL,
           messages: payload.messages,
           stream: false,
+          // Whitelisted, never spread: a client-supplied stream:true would break
+          // the non-streaming parser in dist/ai.js.
+          ...(typeof payload.temperature === "number"
+            ? { temperature: payload.temperature }
+            : {}),
+          ...(typeof payload.top_p === "number" ? { top_p: payload.top_p } : {}),
+          ...(Number.isInteger(payload.max_tokens) && payload.max_tokens > 0
+            ? { max_tokens: payload.max_tokens }
+            : {}),
+          ...(payload.provider && typeof payload.provider === "object"
+            ? { provider: payload.provider }
+            : {}),
         }),
         signal: AbortSignal.timeout(170000),
       });

@@ -36,6 +36,23 @@ test('cloud auth refuses public HTTP, weak secrets, forged cookies and cross-ori
   assert.ok(auth.authenticated({headers:{cookie:cookie.split(';')[0]}}));assert.equal(auth.authenticated({headers:{cookie:'folio_session=fake.signature'}}),false);
   assert.throws(()=>auth.checkOrigin({headers:{origin:'https://evil.example'}}));
 });
+
+test('open-access mode skips password and treats every request as authenticated',()=>{
+  const auth=new CloudAuth({origin:'https://folio.example',openAccess:true});
+  assert.equal(auth.authenticated({headers:{}}),true);
+  assert.equal(auth.authenticated({headers:{cookie:'folio_session=fake.signature'}}),true);
+  assert.throws(()=>new CloudAuth({origin:'http://public.example',openAccess:true}));
+});
+
+test('loopback origin is accepted for local access even when public URL is a tunnel host',()=>{
+  const auth=new CloudAuth({origin:'https://folio.example',secret:'a'.repeat(40),password:passwordHash('pw')});
+  // 本机回环来源放行（固定 http://127.0.0.1:4319 本地访问）
+  assert.doesNotThrow(()=>auth.checkOrigin({headers:{origin:'http://127.0.0.1:4319'}}));
+  assert.doesNotThrow(()=>auth.checkOrigin({headers:{origin:'http://localhost:4319'}}));
+  // 公网来源必须严格匹配
+  assert.doesNotThrow(()=>auth.checkOrigin({headers:{origin:'https://folio.example'}}));
+  assert.throws(()=>auth.checkOrigin({headers:{origin:'https://evil.example'}}));
+});
 test('paired devices have scoped credentials, durable jobs, revocation and idempotent completion',()=>temporary(async root=>{
   let now=100;const store=new CloudStore(root),devices=new Devices(store,{now:()=>now}),pair=await devices.pair();
   const a=await devices.register(pair.code,'Mac A');await assert.rejects(devices.register(pair.code,'Mac B'));
@@ -50,10 +67,37 @@ test('paired devices have scoped credentials, durable jobs, revocation and idemp
 }));
 test('API reading uses actual page tools and rejects a model outside the allowlist',async()=>{
   const calls=[],responses=[{choices:[{message:{role:'assistant',content:null,tool_calls:[{id:'one',type:'function',function:{name:'read_document_page',arguments:JSON.stringify({docId:'d',side:'en',page:2})}}]}}]},{model:'example-model',choices:[{message:{content:'有依据的解释 [论文，原文第 2 页]'}}]}];
-  const ai=new CloudAI({devices:{},env:{FOLIO_AI_BASE_URL:'https://provider.example/v1',FOLIO_AI_MODEL:'example-model'},request:async(url,init)=>{calls.push(JSON.parse(init.body));return {ok:true,json:async()=>responses.shift()};}});
+  const catalog={data:[{id:'example-model',name:'Example',context_length:1000,supported_parameters:['tools'],architecture:{input_modalities:['text']}}]};
+  const ai=new CloudAI({devices:{},env:{FOLIO_AI_BASE_URL:'https://provider.example/v1',FOLIO_AI_MODEL:'example-model'},request:async(url,init)=>{if(String(url).endsWith('/models'))return {ok:true,json:async()=>catalog};calls.push(JSON.parse(init.body));return {ok:true,json:async()=>responses.shift()};}});
   const r=await ai.apiAnswer({messages:[{role:'user',content:'解释'}],literature:{pages:[{docId:'d',name:'论文',side:'en',page:2,text:'ACTUAL EVIDENCE'}]}});
   assert.equal(r.sources[0].page,2);assert.ok(calls[1].messages.some(m=>m.role==='tool'&&m.content.includes('ACTUAL EVIDENCE')));
   await assert.rejects(ai.completion({model:'not-allowed'}),/允许列表/);
+});
+test('a model without tool support cannot answer from memory alone',async()=>{
+  let chats=0;
+  const ai=new CloudAI({devices:{},env:{FOLIO_AI_BASE_URL:'https://openrouter.ai/api/v1',FOLIO_AI_MODEL:'no-tools',FOLIO_AI_MODELS:'no-tools'},request:async(url,init)=>{
+    if(String(url).endsWith('/models'))return {ok:true,json:async()=>({data:[{id:'no-tools',supported_parameters:['temperature']}]})};
+    chats++;return {ok:true,json:async()=>({choices:[{message:{content:'没有检索的回答'}}]})};
+  }});
+  await assert.rejects(ai.apiAnswer({messages:[{role:'user',content:'问'}],literature:{pages:[{docId:'d',name:'p',side:'en',page:1,text:'x'}]}}),/工具调用/);
+  assert.equal(chats,0);
+});
+test('an unreachable model catalog never blocks a working model',async()=>{
+  const ai=new CloudAI({devices:{},env:{FOLIO_AI_BASE_URL:'https://openrouter.ai/api/v1',FOLIO_AI_MODEL:'any',FOLIO_AI_MODELS:'any'},request:async(url)=>{
+    if(String(url).endsWith('/models'))throw Error('offline');
+    return {ok:true,json:async()=>({choices:[{message:{content:'ok'}}]})};
+  }});
+  const r=await ai.apiAnswer({messages:[{role:'user',content:'问'}],literature:{pages:[{docId:'d',name:'p',side:'en',page:1,text:'x'}]}});
+  assert.equal(r.content,'ok');
+});
+test('OpenRouter requests keep user material out of training unless allowed',async()=>{
+  const bodies=[];
+  const env={FOLIO_AI_BASE_URL:'https://openrouter.ai/api/v1',FOLIO_AI_MODEL:'m',FOLIO_AI_MODELS:'m'};
+  const request=async(url,init)=>{bodies.push(JSON.parse(init.body));return {ok:true,json:async()=>({choices:[{message:{content:'x'}}]})}};
+  await new CloudAI({devices:{},env,request}).completion({model:'m',messages:[]});
+  assert.equal(bodies[0].provider.data_collection,'deny');
+  await new CloudAI({devices:{},env:{...env,FOLIO_AI_DATA_COLLECTION:'allow'},request}).completion({model:'m',messages:[]});
+  assert.equal(bodies[1].provider,undefined);
 });
 test('server extracts paired PDF text without a browser',async()=>{
   const pdf=await PDFDocument.create(),font=await pdf.embedFont(StandardFonts.Helvetica);pdf.addPage().drawText('Server-side reading evidence',{font});const data=Buffer.from(await pdf.save()).toString('base64');
@@ -106,5 +150,24 @@ test('HTTP routes require login and origin, and only registered devices can clai
     const p=createDemo();p.projectId='test';r=await fetch(url+'/api/cloud/projects/test',{method:'PUT',headers:logged,body:JSON.stringify({project:p,revision:null})});assert.equal(r.status,200);
     r=await fetch(url+'/api/cloud/projects/test',{method:'PUT',headers:logged,body:JSON.stringify({project:p,revision:null})});assert.equal(r.status,409);
     r=await fetch(url+'/api/feishu/status',{headers:logged});assert.equal((await r.json()).serverManaged,true);
+  }finally{await new Promise(r=>app.server.close(r));}
+}));
+
+test('cloud /api/import/url proxies article fetch and maps failures to clear errors',()=>temporary(async root=>{
+  const probe=net.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
+  const origin='http://127.0.0.1:'+port;
+  const fakeFetch=async(input)=>({ok:true,status:200,url:String(input),headers:{get:()=>'text/html; charset=utf-8'},text:async()=>'<!doctype html><html><body><h1>正文</h1></body></html>'});
+  const resolvePublic=async()=>[{address:'8.8.8.8'}];
+  const env={FOLIO_PUBLIC_URL:origin,FOLIO_DATA_DIR:root,FOLIO_SESSION_SECRET:'test-secret-'.repeat(4),FOLIO_PASSWORD_HASH:passwordHash('test-password')};
+  // request 注入避免真实网络；resolve 固定返回公网地址，SSRF 检查仍生效
+  const app=await createCloudServer({env,request:fakeFetch,articleResolve:resolvePublic});await new Promise(r=>app.server.listen(port,'127.0.0.1',r));
+  const url='http://127.0.0.1:'+app.server.address().port;
+  try{
+    const login=await fetch(url+'/api/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({password:'test-password'})});
+    const logged={Origin:origin,'Content-Type':'application/json',Cookie:login.headers.get('set-cookie').split(';')[0]};
+    let r=await fetch(url+'/api/import/url',{method:'POST',headers:logged,body:JSON.stringify({url:'https://mp.weixin.qq.com/s/x'})});
+    assert.equal(r.status,200);const d=await r.json();assert.ok(d.html.includes('正文'));
+    r=await fetch(url+'/api/import/url',{method:'POST',headers:logged,body:JSON.stringify({url:'http://127.0.0.1:9/admin'})});
+    assert.equal(r.status,502);assert.match((await r.json()).error,/内网|本机/);
   }finally{await new Promise(r=>app.server.close(r));}
 }));

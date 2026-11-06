@@ -13,6 +13,13 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%233b6a58'/%3E%3Cpath d='M17 16h15v32H17zM37 16h10v24H37z' fill='%23eff7eb'/%3E%3C/svg%3E"
     />
+    <!-- 可安装到主屏幕（iPad / Android）-->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="页间 Folio" />
     <link rel="stylesheet" href="./vendor/pdf_viewer.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -35,7 +42,7 @@
             data-icon="download"
           >
             导出</button
-          ><button id="capture-button" class="button subtle">采集箱</button><button id="podcast-button" class="button subtle">导入播客</button><button id="import-button" class="button primary" data-icon="plus">
+          ><button id="capture-button" class="button subtle">采集箱</button><button id="url-import-button" class="button subtle" title="粘贴文章链接，自动读取正文">链接导入</button><button id="podcast-button" class="button subtle">导入播客</button><button id="import-button" class="button primary" data-icon="plus">
             导入文献
           </button>
         </div>

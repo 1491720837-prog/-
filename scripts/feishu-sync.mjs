@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import {renderProject,topBlocks} from '../dist/feishu-format.js';
 import {nativeOutline} from './feishu-outline.mjs';
 import {remoteChanges} from './feishu-readback.mjs';
+import {larkIdentity,identityHint} from './lark-identity.mjs';
 const exec=promisify(execFile),hash=v=>createHash('sha256').update(typeof v==='string'?v:JSON.stringify(v)).digest('hex');
 export function contentSignature(xml){
  return hash(xml.replace(/\s+id="[^"]*"/g,'').replace(/<img\b[^>]*\/?>/g,tag=>'<img '+['src','token','caption'].map(a=>a+'='+JSON.stringify(tag.match(new RegExp('\\b'+a+'="([^"]*)"'))?.[1]||'')).join(' ')+'/>'));
@@ -16,8 +17,8 @@ export class FeishuSync {
  constructor({root=resolve('artifacts/feishu-sync'),run=exec}={}){this.root=root;this.run=run;this.pending=new Map();this.running=false;this.saving=Promise.resolve();this.ready=this.init();}
  async init(){await mkdir(this.root,{recursive:true});try{this.state=JSON.parse(await readFile(join(this.root,'state.json'),'utf8'));}catch{this.state={enabled:false,projects:{}};}for(const p of Object.values(this.state.projects)){if(p.status==='syncing')p.status='interrupted';if(p.status==='conflict'&&networkFailure(p.message))p.status='failed';}await this.save();}
  async save(){const text=JSON.stringify(this.state,null,2);const next=this.saving.catch(()=>{}).then(async()=>{await writeFile(join(this.root,'state.tmp'),text);await rename(join(this.root,'state.tmp'),join(this.root,'state.json'));});this.saving=next;return next;}
- async cli(args){try{const r=await this.run(process.env.FOLIO_LARK_BIN||'lark-cli',[...args,'--as','user','--format','json'],{timeout:240000,maxBuffer:25e6,env:{...process.env,LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'}});const j=JSON.parse(r.stdout);if(j.ok!==true||['failed','partial_success'].includes(j.data?.result))throw Error(j.error?.message||JSON.stringify(j.data));return j.data;}catch(e){let message=e.message;try{message=JSON.parse(e.stderr).error.message;}catch{}throw Error(message.slice(0,1200));}}
- async status(){await this.ready;return {enabled:this.state.enabled,parentUrl:'https://my.feishu.cn/wiki/'+parentNode,projects:Object.entries(this.state.projects).map(([id,p])=>({id,title:p.title,url:p.url,status:p.status,message:p.message,updatedAt:p.updatedAt,nodes:p.nodes,images:p.images}))};}
+ async cli(args){const identity=larkIdentity();try{const r=await this.run(process.env.FOLIO_LARK_BIN||'lark-cli',[...args,'--as',identity,'--format','json'],{timeout:240000,maxBuffer:25e6,env:{...process.env,LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'}});const j=JSON.parse(r.stdout);if(j.ok!==true||['failed','partial_success'].includes(j.data?.result))throw Error(j.error?.message||JSON.stringify(j.data));return j.data;}catch(e){let message=e.message;try{message=JSON.parse(e.stderr).error.message;}catch{}throw Error(identityHint(identity,message).slice(0,1200));}}
+ async status(){await this.ready;return {enabled:this.state.enabled,identity:larkIdentity(),parentUrl:'https://my.feishu.cn/wiki/'+parentNode,projects:Object.entries(this.state.projects).map(([id,p])=>({id,title:p.title,url:p.url,status:p.status,message:p.message,updatedAt:p.updatedAt,nodes:p.nodes,images:p.images}))};}
  async configure(enabled){await this.ready;this.state.enabled=!!enabled;await this.save();return this.status();}
  async enqueue(s){await this.ready;if(!this.state.enabled)throw Error('飞书同步尚未启用');if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(s.projectId)||!Array.isArray(s.nodes)||!Array.isArray(s.docs)||!Array.isArray(s.edges)||typeof s.title!=='string')throw Error('项目格式无效');
   if(s.nodes.length>5000)throw Error('项目节点超过同步上限 5000');

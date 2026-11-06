@@ -13,6 +13,8 @@ async function cli(args){
   const output=args.indexOf('--output-dir'),input=args.indexOf('--file');
   if(output>=0){cwd=resolve(args[output+1]);args[output+1]='.';}
   else if(input>=0&&isAbsolute(args[input+1])){cwd=dirname(args[input+1]);args[input+1]=basename(args[input+1]);}
+  // Podcasts stay on the user identity on purpose: 飞书妙记 belongs to whoever
+  // uploads it, and the transcript has to stay in your own 妙记 space.
   let result;try{result=await exec(process.env.FOLIO_LARK_BIN||'lark-cli',[...args,'--as','user','--format','json'],{cwd,timeout:20*60*1000,maxBuffer:8e6,env:{...process.env,LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'}});}catch(e){let j;try{j=JSON.parse(e.stdout);}catch{try{j=JSON.parse(e.stderr);}catch{}}if(j?.data?.minutes?.length&&j.data.minutes.every(m=>m.status==='processing'&&m.retryable))return j.data;throw Error(j?.error?.message||j?.data?.minutes?.[0]?.error||'飞书请求失败或超时，请检查授权及任务状态后重试');}
   let j;try{j=JSON.parse(result.stdout);}catch{throw Error('飞书没有返回有效结果，请先核对云端是否已创建文件');}
   if(j.ok!==true)throw Error(j.error?.message||'飞书操作未完成');

@@ -48,8 +48,10 @@ import { mergeFeishuChanges } from "./feishu-merge.js";
 import { createDemo, demoSections } from "./demo.js";
 import { download, zip, canvasImage } from "./export.js";
 import {openPodcastImport} from './podcast-import.js';
-import {safeWebURL,textParts} from './content-source.js';
+import {safeWebURL,textParts,transcriptParts} from './content-source.js';
+const TURN_HEADER=/^(Speaker\s+\d+|说话人\s*\d+)\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s*$/;
 import {installBrowserCapture} from './browser-capture.js';
+import {extractDocument} from './url-import.js';
 const $ = (q, r = document) => r.querySelector(q),
   $$ = (q, r = document) => [...r.querySelectorAll(q)];
 const icons = {
@@ -337,6 +339,7 @@ async function renderReader() {
   stopCrop();
   $("#document-name").textContent = d.name;
   const heading=$('.english-panel .panel-title');heading.innerHTML='<span class="panel-number">01</span> '+(d.contentKind==='podcast'?'播客逐字稿':d.contentKind==='article'?'文章阅读':'原文阅读')+' <span class="language-badge">'+(d.contentKind==='podcast'?'音频':d.contentKind==='article'?'网页':'EN')+'</span>';
+  $('.english-panel .transcript-toc')?.remove();if(tocScrollCleanup){tocScrollCleanup();tocScrollCleanup=null;}
   $('#english-scroll').setAttribute('aria-label',d.contentKind==='podcast'?'播客逐字稿连续阅读区':d.contentKind==='article'?'文章连续阅读区':'英文文献连续阅读区');
   const pairedView=!d.contentKind&&translationVisible;
   $(".content-workspace").classList.toggle('single-source',!pairedView);
@@ -347,8 +350,13 @@ async function renderReader() {
   updateReaderPosition();
   updateZoomControls();
   for (const el of $$(".reader-scroll")) el.classList.toggle("fit-content", d.type === "pdf" && readerFitContent);
-  $("#english-paper").style.width = readerZoom * 100 + "%";
-  $("#chinese-paper").style.width = readerZoom * 100 + "%";
+  // PDF 按容器宽度重新渲染画布；文本/示例类文献只改宽度不会放大字号，改用 em 缩放（zoom 属性会破坏划词选区坐标）。
+  const textLike = d.type !== "pdf";
+  for (const paper of [$("#english-paper"), $("#chinese-paper")]) {
+    if (!paper) continue;
+    if (textLike) { paper.style.width = "100%"; paper.style.fontSize = readerZoom * 100 + "%"; }
+    else { paper.style.fontSize = ""; paper.style.width = readerZoom * 100 + "%"; }
+  }
   $("#translate-button").disabled = d.type === "demo" || !!d.translationPDF || d.contentKind==='podcast';
   $("#import-translation").innerHTML = icon("file") + (d.translationPDF ? "管理中文译本" : "导入中文译本");
   $("#translation-status").textContent =
@@ -366,7 +374,7 @@ async function renderReader() {
       const info=document.createElement('p');info.className='content-provenance';info.textContent=d.contentKind==='podcast'?'飞书妙记逐字稿 · 保留转写原文和时间标记':'浏览器采集 · 正文快照';
       for(const [label,url] of [['原始链接',d.provenance?.sourceUrl],['飞书妙记',d.provenance?.minuteUrl]])if(safeWebURL(url)){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.textContent=' · '+label;info.append(a);}en.append(info);
     }
-    const readingParts=d.contentKind==='article'&&d.contentBlocks?.length?d.contentBlocks:textParts(d).map(text=>({type:'text',text}));
+    const readingParts=d.contentKind==='podcast'?transcriptParts(d.text):d.contentKind==='article'&&d.contentBlocks?.length?d.contentBlocks:textParts(d).map(text=>({type:'text',text}));
     for (const [i, part] of readingParts.entries()) {
       if(part.type==='image'){
         const figure=document.createElement('figure');figure.dataset.section='t'+i;
@@ -374,7 +382,25 @@ async function renderReader() {
         else{const a=document.createElement('a');a.textContent='图片未保存 · 打开原图';a.href=safeWebURL(part.url);a.target='_blank';a.rel='noopener';figure.append(a);}en.append(figure);continue;
       }
       const el = document.createElement("p");
-      el.textContent = part.text;
+      if (part.type === "heading") {
+        const h = document.createElement(part.level === 1 ? "h2" : "h3");
+        h.textContent = part.text;
+        h.className = "transcript-heading";
+        en.append(h);
+        continue;
+      }
+      if (part.type === "turn") {
+        const label = document.createElement("b");
+        label.textContent = part.speaker + " ";
+        const time = document.createElement("span");
+        time.className = "turn-time";
+        time.textContent = part.time || "";
+        el.append(label, time, document.createTextNode("\n" + part.text));
+      } else if (TURN_HEADER.test(part.text)) {
+        const m = TURN_HEADER.exec(part.text);
+        el.dataset.turn = m[1] + " " + m[2];
+        el.textContent = part.text.slice(m[0].length).replace(/^\s*\n/, "");
+      } else el.textContent = part.text;
       el.style.whiteSpace = 'pre-wrap';
       el.dataset.section = "t" + i;
       en.append(el);
@@ -383,6 +409,7 @@ async function renderReader() {
     $("#english-paper").replaceChildren(en);
     if(d.contentKind==='podcast'){
       const panel=document.createElement('article');panel.className='demo-paper';const heading=document.createElement('h2');heading.textContent='播客逐字稿';const p=document.createElement('p');p.textContent='左侧可连续阅读、高亮并生成摘录节点。转写为飞书自动识别结果，专有名词和说话人请结合音频核对。';panel.append(heading,p);const b=document.createElement('button');b.className='button';b.textContent='下载完整文字稿';b.onclick=()=>download(d.name+'.txt',d.text,'text/plain;charset=utf-8');panel.append(b);$('#chinese-paper').replaceChildren(panel);$('#translation-status').textContent='播客逐字稿 · 非译文';
+      mountTranscriptExtras(en,d);
     }else renderTextTranslation(d);
   } else {
     $("#english-paper").textContent = "正在准备连续阅读…";
@@ -451,6 +478,48 @@ async function renderReader() {
   if (epoch !== renderEpoch) return;
   renderHighlights();
   attachReaderEvents();
+}
+let tocScrollCleanup=null,tocScrollHandler=null;
+function mountTranscriptExtras(en,d){
+  if(tocScrollCleanup){tocScrollCleanup();tocScrollCleanup=null;}
+  $(".english-panel .transcript-toc")?.remove();
+  const panelTitle=$(".english-panel .panel-title");
+  const heads=[...en.querySelectorAll("h2.transcript-heading,h3.transcript-heading")];
+  heads.forEach((h,i)=>{h.id="transcript-toc-"+i;});
+  if(heads.length>=2){
+    const btn=document.createElement("button");
+    btn.className="small-button panel-extra-button";btn.textContent="目录";btn.setAttribute("aria-expanded","false");
+    panelTitle.append(btn);
+    const toc=document.createElement("nav");
+    toc.className="transcript-toc hidden";toc.setAttribute("aria-label","逐字稿目录");
+    toc.innerHTML=heads.map((h,i)=>`<button class="toc-item ${h.tagName==="H2"?"toc-l1":"toc-l2"}" data-toc-target="${h.id}">${esc(h.textContent)}</button>`).join("");
+    $(".english-panel").append(toc);
+    btn.onclick=()=>{
+      const show=toc.classList.toggle("hidden")===false;
+      btn.setAttribute("aria-expanded",String(show));
+      if(show&&tocScrollHandler)tocScrollHandler();
+    };
+    toc.onclick=e=>{
+      const item=e.target.closest("[data-toc-target]");if(!item)return;
+      document.getElementById(item.dataset.tocTarget)?.scrollIntoView({behavior:"smooth",block:"start"});
+    };
+    const scroll=$("#english-scroll");
+    tocScrollHandler=()=>{
+      const top=scroll.getBoundingClientRect().top+90;
+      let active=-1;
+      for(let i=0;i<heads.length;i++)if(heads[i].getBoundingClientRect().top<=top)active=i;
+      toc.querySelectorAll(".toc-item").forEach((it,i)=>it.classList.toggle("active",i===active));
+    };
+    scroll.addEventListener("scroll",tocScrollHandler,{passive:true});
+    tocScrollCleanup=()=>scroll.removeEventListener("scroll",tocScrollHandler);
+  }
+  const docUrl=d.provenance?safeWebURL(d.provenance.hierarchicalDocUrl):"";
+  if(docUrl&&/feishu\.cn|larkoffice\.com/.test(new URL(docUrl).hostname)){
+    const fb=document.createElement("button");
+    fb.className="small-button panel-extra-button";fb.textContent="飞书视图";
+    panelTitle.append(fb);
+    fb.onclick=()=>modal("飞书文档视图",`<iframe class="feishu-frame" src="${esc(docUrl)}" title="逐字稿飞书文档" loading="lazy"></iframe><p>目录、编辑、评论均为飞书原生界面；浏览器需保持飞书登录。在飞书里的修改会经飞书同步回流到工作台。</p>`,`<a class="button" href="${esc(docUrl)}" target="_blank" rel="noopener">新标签页打开</a>`);
+  }
 }
 function untranslatedPage(page) {
   const sheet = document.createElement("div");
@@ -1344,7 +1413,7 @@ function editNode(id, focusQuestion = false, focusField = null) {
   };
   disposeModelPicker=mountModelPicker($("#followup-form .model-picker"),{
     getConfig:()=>state.config,
-    onSelect:model=>{state.config={...state.config,readingProvider:"codex",codexModel:model};save();checkStatus();},
+    onSelect:applyModelSelection,
     onSettings:settings,
   });
   $("#followup-form").onsubmit = (e) => {
@@ -2168,12 +2237,101 @@ function openContext() {
     }
   };
 }
+function importFromUrl() {
+  const dialog = modal(
+    "链接导入",
+    `<p>粘贴公开文章链接：公众号、博客、新闻页都可以。抓取由当前服务完成（本机版为本机服务，在线版为云端服务器），正文和图片顺序会先进入采集箱供你预览，再决定保存为独立项目还是当前项目。</p><label class="field-label" for="url-import-input">文章链接</label><input class="text-field" id="url-import-input" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off" spellcheck="false"><p id="url-import-status" role="status">需要登录、付费或整页由脚本生成的文章无法直接读取，请改用浏览器扩展。</p>`,
+    '<button id="url-import-go" class="button primary">读取正文</button>',
+  );
+  const input = $("#url-import-input", dialog),
+    status = $("#url-import-status", dialog),
+    go = $("#url-import-go", dialog);
+  input.focus();
+  const submit = async () => {
+    const value = input.value.trim();
+    if (!value) {
+      status.textContent = "请先粘贴文章链接";
+      return;
+    }
+    go.disabled = true;
+    status.textContent = "正在读取正文…";
+    try {
+      const response = await fetch("/api/import/url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: value }),
+      });
+      const data = await response.json();
+      if (response.status === 404 && !data.error) throw new Error("当前服务不支持链接抓取，请改用本机版或浏览器扩展");
+      if (!response.ok) {
+        let message = data.error || "读取失败";
+        if (message === "Not found") message = "在线版尚未支持链接导入，请稍后重试或改用浏览器扩展";
+        throw new Error(message);
+      }
+      const capture = extractDocument(
+        new DOMParser().parseFromString(data.html, "text/html"),
+        data.finalUrl || value,
+      );
+      window.postMessage({ type: "folio-capture", id: crypto.randomUUID(), capture }, location.origin);
+      status.textContent = "已进入采集箱，正在打开预览…";
+      setTimeout(() => {
+        dialog.close();
+        $("#capture-button")?.click();
+      }, 600);
+    } catch (e) {
+      status.textContent = e.message;
+      go.disabled = false;
+    }
+  };
+  go.onclick = submit;
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submit();
+    }
+  });
+}
+let apiAllowlist = [];
+function applyModelSelection(model, meta = {}) {
+  const provider = meta.provider === "api" ? "api" : "codex";
+  state.config = { ...state.config, readingProvider: provider, ...(provider === "api" ? { model } : { codexModel: model }) };
+  save();
+  checkStatus();
+  if (provider === "api" && model && apiAllowlist.length && !apiAllowlist.includes(model))
+    toast("该模型不在 FOLIO_AI_MODELS 中，项目对话会被拒绝");
+}
+async function loadApiModelOptions() {
+  const list = $("#api-model-options");
+  if (!list) return;
+  try {
+    const data = await (await fetch("/api/models")).json();
+    const models = Array.isArray(data.models) ? data.models : [];
+    list.replaceChildren(
+      ...models.filter((m) => m.tools).map((m) => {
+        const option = document.createElement("option");
+        option.value = m.id;
+        option.label = m.context ? `${m.name} · ${Math.round(m.context / 1000)}k` : m.name;
+        return option;
+      }),
+    );
+    const note = $("#api-model-note");
+    if (note)
+      note.textContent = data.error
+        ? `模型列表不可用：${data.error}`
+        : models.length
+          ? `已读取 ${models.filter((m) => m.tools).length} 个支持工具调用的模型。`
+          : "服务端尚未配置 API 服务商，请先在 .env.local 填写 FOLIO_AI_BASE_URL 与 FOLIO_AI_MODEL。";
+  } catch {
+    // The list is a convenience; a missing gateway must not block manual input.
+  }
+}
 function settings() {
   modal(
     "连接阅读助手",
-    `<label class="field-label" for="reading-provider">问答与总结使用</label><select class="select-field" id="reading-provider"><option value="codex" ${(state.config.readingProvider||"codex")==="codex"?"selected":""}>Codex 阅读助手（本机登录）</option><option value="api" ${state.config.readingProvider==="api"?"selected":""}>OpenAI 兼容 API</option></select><p>Codex 会结合摘录、附近页面和分支历史回答，必要时检索本篇全文。使用你的 Codex 账户额度。</p><label class="field-label" for="codex-model">Codex 模型</label><select class="select-field" id="codex-model"><option value="">使用账户默认模型</option>${state.config.codexModel?`<option selected value="${esc(state.config.codexModel)}">${esc(state.config.codexModel)}</option>`:""}</select><button id="check-codex" class="small-button">检查 Codex</button><p id="codex-status">正在检查本机 Codex…</p><hr><p>完整 PDF 翻译使用上方所选 Codex 模型，包含正文和所有图片内的文字，并生成可下载的中文 PDF。下方 API 用于兼容服务问答及纯文本翻译。本机版本通过服务端转发请求，密钥不会进入浏览器或项目导出文件。</p><label class="field-label" for="api-endpoint">工作台网关地址（不是模型厂商地址）</label><input class="text-field" id="api-endpoint" value="${esc(state.config.endpoint || "/api/chat")}" placeholder="/api/chat"><label class="field-label" for="api-model">模型名称（留空使用服务端默认值）</label><input class="text-field" id="api-model" value="${esc(state.config.model || "")}" placeholder="使用你实际可用的模型名称"><details style="margin-top:18px"><summary style="font-size:12px;cursor:pointer">本机配置方法</summary><p>在项目目录复制 <code>.env.example</code> 为 <code>.env.local</code>，填写后重新启动工作台。</p><pre>FOLIO_AI_BASE_URL=https://你的服务商/v1\nFOLIO_AI_MODEL=你的模型名称\nFOLIO_AI_API_KEY=你的密钥</pre><p>运行 <code>npm run dev</code>，打开 <code>http://127.0.0.1:4318</code>。在线预览需使用你部署的 HTTPS 网关；它应接受 OpenAI messages 请求并返回 choices，且允许此站点跨域访问。</p></details><p id="connection-result"></p><label class="field-label">已学习的快捷操作</label><div id="shortcut-list">${state.shortcuts.length ? state.shortcuts.map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;margin:9px 0"><span>${esc(s.label)}</span><button class="small-button" data-remove-shortcut="${s.id}">删除</button></div>`).join("") : "<p>同类提问超过 3 次后，会建议添加新的快捷操作。</p>"}</div>`,
+    `<label class="field-label" for="reading-provider">问答与总结使用</label><select class="select-field" id="reading-provider"><option value="codex" ${(state.config.readingProvider||"codex")==="codex"?"selected":""}>Codex 阅读助手（本机登录）</option><option value="api" ${state.config.readingProvider==="api"?"selected":""}>OpenAI 兼容 API</option></select><p>Codex 会结合摘录、附近页面和分支历史回答，必要时检索本篇全文。使用你的 Codex 账户额度。</p><label class="field-label" for="codex-model">Codex 模型</label><select class="select-field" id="codex-model"><option value="">使用账户默认模型</option>${state.config.codexModel?`<option selected value="${esc(state.config.codexModel)}">${esc(state.config.codexModel)}</option>`:""}</select><button id="check-codex" class="small-button">检查 Codex</button><p id="codex-status">正在检查本机 Codex…</p><hr><p>完整 PDF 翻译使用上方所选 Codex 模型，包含正文和所有图片内的文字，并生成可下载的中文 PDF。下方 API 用于兼容服务问答及纯文本翻译。本机版本通过服务端转发请求，密钥不会进入浏览器或项目导出文件。</p><label class="field-label" for="api-endpoint">工作台网关地址（不是模型厂商地址）</label><input class="text-field" id="api-endpoint" value="${esc(state.config.endpoint || "/api/chat")}" placeholder="/api/chat"><label class="field-label" for="api-model">模型名称（留空使用服务端默认值）</label><input class="text-field" id="api-model" list="api-model-options" value="${esc(state.config.model || "")}" placeholder="输入或从列表选择模型 ID"><datalist id="api-model-options"></datalist><p id="api-model-note">模型列表来自工作台服务端，只列出支持工具调用的模型；项目对话需要检索全文。</p><details style="margin-top:18px"><summary style="font-size:12px;cursor:pointer">本机配置方法</summary><p>在项目目录复制 <code>.env.example</code> 为 <code>.env.local</code>，填写后重新启动工作台。</p><pre>FOLIO_AI_BASE_URL=https://你的服务商/v1\nFOLIO_AI_MODEL=你的模型名称\nFOLIO_AI_API_KEY=你的密钥</pre><p>运行 <code>npm run dev</code>，打开 <code>http://127.0.0.1:4318</code>。在线预览需使用你部署的 HTTPS 网关；它应接受 OpenAI messages 请求并返回 choices，且允许此站点跨域访问。</p></details><p id="connection-result"></p><label class="field-label">已学习的快捷操作</label><div id="shortcut-list">${state.shortcuts.length ? state.shortcuts.map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;margin:9px 0"><span>${esc(s.label)}</span><button class="small-button" data-remove-shortcut="${s.id}">删除</button></div>`).join("") : "<p>同类提问超过 3 次后，会建议添加新的快捷操作。</p>"}</div>`,
     `<button id="test-connection" class="button">测试连接</button><button id="save-settings" class="button primary">保存设置</button>`,
   );
+  loadApiModelOptions();
   $("#save-settings").onclick = () => {
     const endpoint = $("#api-endpoint").value.trim() || "/api/chat";
     try {
@@ -2184,7 +2342,7 @@ function settings() {
       save();
       $("#modal").close();
       checkStatus();
-      toast("设置已保存");
+      toast(state.config.model && apiAllowlist.length && !apiAllowlist.includes(state.config.model) ? "已保存；该模型不在 FOLIO_AI_MODELS 中，项目对话会被拒绝" : "设置已保存");
     } catch (e) {
       toast(e.message);
     }
@@ -2253,6 +2411,7 @@ async function checkStatus() {
     const r = await fetch("/api/status");
     if (!r.ok) throw new Error();
     const data = await r.json();
+    apiAllowlist = Array.isArray(data.models) ? data.models : [];
     $("#ai-status").textContent = data.configured ? "AI 已配置" : "AI 待连接";
   } catch {
     $("#ai-status").textContent = "AI 待连接";
@@ -2402,6 +2561,7 @@ async function importContentResult(result){
 }
 bind('#podcast-button',()=>openPodcastImport({modal,esc,projectId:()=>state.projectId,uid,download,toast,onImport:importContentResult}));
 installBrowserCapture({button:$('#capture-button'),modal,esc,uid,projectId:()=>state.projectId,onImport:importContentResult,toast});
+bind('#url-import-button',importFromUrl);
 boardChat=mountBoardChat({root:$('#board-chat'),getState:()=>state,getSelected:()=>selected,persist:async workspace=>{clearTimeout(saveTimer);await writeSaved(workspace);if(state===workspace)$("#save-status").innerHTML=isCloud?"<i></i> 已保存到云端":"<i></i> 已保存到本机";},toast,onSettings:settings,onResize:refreshWorkspaceSize,preferences:readingPreferences,
   onNode(message,text,position){checkpoint();const n=makeNode({kind:message.role==='assistant'?'ai':'note',title:text.split('\n')[0].slice(0,100)||'聊天摘录',text,prompt:message.prompt||'',source:message.source?structuredClone(message.source):undefined,chatSource:{chatId:state.chat.id,messageId:message.id,role:message.role,model:message.model,at:message.at},aiEvidence:message.evidence?{...message.evidence,provider:message.evidence.provider||(message.threadId?'codex':'api'),model:message.model||'API 服务默认',trace:message.evidence.trace||[]}:undefined});if(position)Object.assign(n,position);selected=new Set([n.id]);changed();centerNode(n.id);},
   onOutline(plan,doc,messageId){checkpoint();const ids=new Map();for(const item of plan){const n=makeNode({kind:'ai',title:item.title,text:item.text+(item.timestamp?'\n\n时间：'+item.timestamp:''),prompt:'整理播客内容',source:{docId:doc.id,page:1,side:'en',text:item.quote,selectedText:item.quote},chatSource:{chatId:state.chat.id,messageId,role:'assistant'}},ids.get(item.parentId)||null);ids.set(item.id,n.id);}changed();boardChat?.render();toast('已生成 '+plan.length+' 个节点；开启飞书同步后会自动更新文档');}

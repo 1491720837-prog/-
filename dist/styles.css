@@ -375,7 +375,7 @@ body.workspace-fullscreen .drawer { top: 0; }
   margin-bottom: 24px;
 }
 .demo-paper h1 {
-  font-size: 30px;
+  font-size: 2.727em;
   font-weight: 500;
   line-height: 1.2;
   letter-spacing: -0.8px;
@@ -384,7 +384,7 @@ body.workspace-fullscreen .drawer { top: 0; }
   color: #334a3c;
 }
 .demo-paper .subtitle {
-  font-size: 11px;
+  font-size: 1em;
   line-height: 1.6;
   color: #727867;
   margin: 0 0 19px;
@@ -399,12 +399,40 @@ body.workspace-fullscreen .drawer { top: 0; }
   margin-bottom: 24px;
 }
 .demo-paper h2 {
-  font-size: 15px;
+  font-size: 1.364em;
   margin: 25px 0 11px;
   font-weight: 600;
 }
+/* 层级化逐字稿：话题/小节标题与时间戳样式 */
+.demo-paper h2.transcript-heading {
+  font-size: 1.6em;
+  margin: 30px 0 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #dfe3d7;
+  color: #334a3c;
+}
+.demo-paper h3.transcript-heading {
+  font-size: 1.25em;
+  margin: 24px 0 10px;
+  color: #3f5648;
+}
+/* 播客逐字稿说话人段落：首行加粗由 <b> 承担，时间戳弱化显示 */
+.demo-paper p[data-turn] {
+  padding-left: 10px;
+  border-left: 2px solid #e4e8dc;
+}
+.demo-paper p[data-turn] b {
+  color: #3f5648;
+}
+.turn-time {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.72em;
+  color: #9aa08c;
+  font-weight: 400;
+  margin-left: 6px;
+}
 .demo-paper p {
-  font-size: 11px;
+  font-size: 1em;
   line-height: 1.9;
   margin: 0 0 14px;
   text-align: left;
@@ -421,13 +449,13 @@ body.workspace-fullscreen .drawer { top: 0; }
   padding: 12px 13px;
   border-left: 2px solid #9eaf89;
   background: #f3f4e9;
-  font-size: 13px;
+  font-size: 1.182em;
   line-height: 1.7;
   color: #5d7050;
   font-style: italic;
 }
 .demo-paper .caption {
-  font-size: 8px;
+  font-size: 0.727em;
   line-height: 1.6;
   color: #929482;
   text-align: center;
@@ -445,16 +473,16 @@ body.workspace-fullscreen .drawer { top: 0; }
   font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
 }
 .demo-paper.zh h1 {
-  font-size: 28px;
+  font-size: 2.545em;
   letter-spacing: 1px;
   line-height: 1.27;
 }
 .demo-paper.zh p {
-  font-size: 11px;
+  font-size: 1em;
   line-height: 2;
 }
 .demo-paper.zh h2 {
-  font-size: 14px;
+  font-size: 1.273em;
 }
 .demo-figure {
   width: 100%;
@@ -1732,6 +1760,9 @@ dialog::backdrop {
 .model-picker-menu button:hover, .model-picker-menu button:focus-visible { background: #f0f5e9; outline: none; }
 .model-picker-menu button[aria-checked=true] { color: #547346; background: #f5f8f0; }
 .model-menu-note { font-size: 10px; color: #8c9981; padding: 10px 9px 6px; line-height: 1.5; }
+.model-menu-search { width: 100%; margin: 2px 0 8px; padding: 7px 9px; border: 1px solid #dce3d5; border-radius: 8px; font-size: 12px; }
+.model-menu-search:focus-visible { outline: 2px solid #b7cea6; outline-offset: 1px; }
+.model-menu-api { display: grid; gap: 2px; }
 .model-picker-menu .model-menu-settings { color: #859577; font-size: 11px; }
 .project-list { display: grid; gap: 12px; max-height: 55vh; overflow: auto; }
 .project-entry { padding: 16px; border: 1px solid #dce5d5; border-radius: 9px; }
@@ -1836,3 +1867,44 @@ body.workspace-fullscreen .project-sidebar { display: none; }
 .highlight-layer { mix-blend-mode: multiply; opacity: .55; }
 .highlight-rect { background: #f0e49765; mix-blend-mode: normal; }
 .highlight-rect.focused { background: #ead47e80; outline: 1px solid #bd9a4770; }
+
+/* 逐字稿目录侧栏与飞书视图 */
+.english-panel { position: relative; }
+.panel-extra-button { margin-left: 8px; }
+.transcript-toc {
+  position: absolute;
+  top: 46px;
+  right: 12px;
+  width: 264px;
+  max-height: 66%;
+  overflow: auto;
+  background: var(--paper);
+  border: 1px solid #dfe3d7;
+  border-radius: 10px;
+  box-shadow: 0 10px 28px #283b2326;
+  padding: 8px;
+  z-index: 30;
+}
+.transcript-toc .toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4d5a4d;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.transcript-toc .toc-item:hover { background: #eef2e8; }
+.transcript-toc .toc-item.active { color: #3b6a58; background: #e7f0e8; font-weight: 600; }
+.transcript-toc .toc-l2 { padding-left: 22px; font-size: 11.5px; }
+.feishu-frame {
+  width: 100%;
+  height: 70vh;
+  border: 1px solid #dfe3d7;
+  border-radius: 10px;
+  background: #fff;
+}
